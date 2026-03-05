@@ -1,0 +1,209 @@
+{% set SERIALQ = "normal" %}
+{% set NCPU_PER_NODE = 48 %}
+{% set GB_PER_CORE = 4 %}
+{% set MODULE_AVAIL = 'module use /g/data/hr22/modulefiles /g/data/access/ngm/modules' %}
+{% set MODULE_VERSIONS = {'intel': '2023.0.0'} %}
+{% set LFRIC_TARGET_COMPILER = 'intel' %}
+{% set MODULE_VERSION = MODULE_VERSIONS[LFRIC_TARGET_COMPILER] %}
+{% set FASTMEM = '\$TMPDIR' %}
+
+                      # sed -i -e 's/export META_FILE_DIR = $(PROJECT_DIR)\/rose-meta\/lfric-$(PROJECT_NAME)\/$(META_VN)/export META_FILE_DIR = $(APPS_ROOT_DIR)\/science\/gungho\/rose-meta\/lfric-gungho\/$(META_VN)/'  $CYLC_SUITE_SHARE_DIR/fcm_make_lfric/extract/lfric_apps/applications/lfric_atm/Makefile
+
+[runtime]
+    [[fcm_make_lfric]]
+        inherit = HOST_LOCAL
+        post-script = """
+            fcm export --force ${CORE_URL}/rose-meta/${CORE_REV} ${EXTRACT_LOCATION}/lfric_core/rose-meta
+            fcm export --force ${APPS_URL}/rose-meta/${APPS_REV} ${EXTRACT_LOCATION}/lfric_apps/rose-meta
+            for app in lfric_atm # adjoint_tests gravity_wave gungho_model jedi_lfric_tests lfric2lfric lfric_coupled linear_model ngarch shallow_water solver transport
+            do
+              rm -rf ${EXTRACT_LOCATION}/lfric_apps/applications/${app}/optimisation
+              fcm export --force ${APPS_URL}/applications/${app}/optimisation/${APPS_REV} ${EXTRACT_LOCATION}/lfric_apps/applications/${app}/optimisation
+            done
+            sed -i -e 's/FFLAGS_WARNINGS           = -warn all -warn errors -gen-interfaces nosource/FFLAGS_WARNINGS           = -warn all -gen-interfaces nosource/' $CYLC_SUITE_SHARE_DIR/fcm_make_lfric/extract/lfric_core/infrastructure/build/fortran/ifort.mk
+                      """
+
+    [[BUILD_HPC_LFRIC]]
+        [[[ job ]]]
+            batch system = pbs
+        [[[ remote ]]]
+            host = gadi.nci.org.au
+        [[[directives]]]
+            -q = {{SERIALQ}}
+            -l mem=40GB
+            -l walltime=02:00:00
+            -l storage=gdata/access+gdata/hr22+gdata/ki32+scratch/access+gdata/{{environ.get('PROJECT','NO_PROJECT')}}
+            -W umask=0022
+        [[[environment]]]
+	    LFRIC_TARGET_PLATFORM = nci-gadi
+            FASTMEM = $CYLC_TASK_WORK_DIR
+            FFLAGS  = ''
+            LDFLAGS = ''
+            PSYCLONE_TRANSFORMATION = meto-xc40
+            HYPERTHREADS = 1
+            CORES_PER_NODE = {{NCPU_PER_NODE}}
+            NUMA_REGIONS_PER_NODE = 2
+        [[[job]]]
+            execution time limit = PT2H
+
+    [[LFRICINPUTS_ENV]]
+        pre-script = """
+                     {{MODULE_AVAIL}}
+                     module unload openmpi/4.0.1
+                     module unload intel-mkl/2019.3.199
+                     module unload python2/2.7.16
+                     module load /g/data/access/ngm/modules/envs/lfric/202506/intel-openmpi
+                     module list 2>&1
+                     """
+        [[[environment]]]
+            LFRICINPUTS_CONFIG = nci-gadi-ifort-gcc
+
+    [[LFRIC_ENV]]
+        pre-script = """
+                     {{MODULE_AVAIL}}
+                     module unload openmpi/4.0.1
+                     module unload intel-mkl/2019.3.199
+                     module unload python2/2.7.16
+                     module load /g/data/access/ngm/modules/envs/lfric/202506/intel-openmpi
+                     module list 2>&1
+                     """
+
+    [[LFRIC_GEN_WEIGHTS]]
+        inherit = BUILD_HPC_LFRIC, LFRIC_ENV
+        pre-script = """
+                     module purge
+                     module use /g/data/access/ngm/modules
+                     module use /g/data/access/projects/access/modules
+                     module use /g/data/hr22/modulefiles
+                     module load analysis3/21.10
+                     module load ants/0.18.0
+                     module list 2>&1
+                     """
+        [[[directives]]]
+            -l mem=64GB
+            -l ncpus=16
+
+    [[UM_CREATEBC_LFRIC_TASKS]]
+        pre-script = """
+                     module unload python2/2.7.16
+                     module unload python2-as-python
+                     module use /g/data/access/ngm/modules
+                     module load analysis3/21.10
+                     module load ants/0.18.0
+                     module list 2>&1
+                     """
+        [[[directives]]]
+            -l mem=64GB
+            -l ncpus=16
+ 
+    [[EXTRACT_LFRICINPUTS]]
+        inherit = HOST_LOCAL
+        [[[environment]]]
+            LFRICINPUTS_CONFIG = nci-gadi-ifort-gcc
+            FFLAGS             = ''
+            LDFLAGS            = ''
+
+    [[LFRIC_FIX_NC_HDR]]
+        inherit = HOST_HPC
+        pre-script = """
+                     module purge
+                     module use /g/data/access/ngm/modules
+                     module use /g/data/access/projects/access/modules
+                     module use /g/data/hr22/modulefiles
+                     module load nco/5.0.5
+                     module list 2>&1
+                     """
+   	[[[directives]]]
+            -l ncpus=16
+   	    -l mem=64GB
+
+    [[TARGET_SHARED_1]]
+
+    [[TARGET_PARALLEL_NODE]]
+        inherit = BUILD_HPC_LFRIC
+        [[[directives]]]
+            -l ncpus={{NCPU_PER_NODE}}
+            -l mem={{GB_PER_CORE}}GB
+
+    [[LFRIC_INSTALL_FILES_HPC]]
+
+    [[compile_lfric_atm]]
+        [[[environment]]]
+            ROSE_APP_OPT_CONF_KEYS = prod_build
+
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+
+        {# Generate weights #}
+        [[{{regn["name"]}}_{{resln["name"]}}_generate_weights]]
+        post-script = """
+	              scp -rp $LOCAL_WEIGHT_LOC $REMOTE_WEIGHT_LOC
+		      """
+	[[[environment]]]
+            REMOTE_WEIGHT_LOC = $CYLC_SUITE_RUN_DIR/share/data/meshes/{{regn["name"]}}_{{resln["name"]}}_generate_weights
+            LOCAL_WEIGHT_LOC = $CYLC_SUITE_RUN_DIR/work/${ROSE_TASK_CYCLE_TIME}/{{regn["name"]}}_{{resln["name"]}}_generate_weights
+
+        {% for mod in resln["models"] %}
+            {% set NPROCS_XIOS = mod["lfric_nproc"][2] %}
+            {% set NNODES_XIOS = mod["lfric_nproc"][3] %}
+            {% set NPROCS_LFRIC = (mod["lfric_nproc"][4] * mod["lfric_nproc"][5])|int %}
+            {% set NNODES_LFRIC = (NPROCS_LFRIC/NCPU_PER_NODE) | round (0, 'ceil') | int %}
+            {% set LFRIC_LAM_NPROCS_TOTAL = ((NNODES_XIOS + NNODES_LFRIC)*NCPU_PER_NODE) %}
+            {% set LFRIC_LAM_MEMORY = LFRIC_LAM_NPROCS_TOTAL*GB_PER_CORE %}
+            {% set XIOS_SLOTS = (NPROCS_XIOS/(2*NNODES_XIOS)) | round (0, 'ceil') | int %}
+
+        [[{{model(regn, resln, mod)}}_lfric]]
+        [[[directives]]]
+            -l ncpus={{LFRIC_LAM_NPROCS_TOTAL}}
+            -l mem={{LFRIC_LAM_MEMORY}}GB
+        [[[environment]]]
+	    TARGET_PLATFORM   = nci-gadi
+            RUN_METHOD        = mpiexec
+            XIOS_SERVER_MODE  = True
+            XIOS_SERVER_RANKS = {{NPROCS_XIOS}}
+            TOTAL_RANKS       = {{NPROCS_LFRIC}}
+
+        [[{{model(regn, resln, mod)}}_um2lfric]]
+            [[[directives]]]
+                -l ncpus={{mod["lfric_nproc"][0]}}
+                -l mem={{mod["lfric_nproc"][0]*GB_PER_CORE}}GB
+            [[[environment]]]
+                ROSE_APP_COMMAND_KEY = no_xios_server
+                ROSE_LAUNCHER_PREOPTS = -n {{mod["lfric_nproc"][0]}}
+
+                {% for cr in range(resln["n_cruns"]) %}        
+                    {% set crp = cr|pad(3,"0") %}
+        [[{{model(regn, resln, mod)}}_lfric_atm_{{crp}}]]
+            script = rose task-run --verbose --command-key=remap_xios_openmpi --path= --path=$BIN_DIR
+            [[[environment]]]
+                XIOS_SLOTS_PER_NODE = {{XIOS_SLOTS}}
+
+        [[{{model(regn, resln, mod)}}_um2lfric_lbc_{{crp}}]]
+            [[[directives]]]
+                -l ncpus={{mod["lfric_nproc"][0]}}
+                -l mem={{mod["lfric_nproc"][0]*GB_PER_CORE}}GB
+            [[[environment]]]
+                ROSE_APP_COMMAND_KEY = no_xios_server
+                ROSE_LAUNCHER_PREOPTS = -n {{mod["lfric_nproc"][0]}}
+
+        [[{{model(regn, resln, mod)}}_postproc_lfric_{{crp}}]]
+            inherit = HOST_HPC
+            pre-script = """
+                         module purge
+                         module use /g/data/access/ngm/modules
+                         module load lfric-analysis/24.06
+                         module load netcdf
+                         module list 2>&1
+                         """
+            [[[environment]]]
+                INPUT_DIR = $CYLC_SUITE_SHARE_DIR/cycle/${ROSE_TASK_CYCLE_TIME}/{{regn["name"]}}/{{resln["name"]}}/{{mod["name"]}}/lfric
+                SLAM_OUTPUT_DIR = $ROSE_DATAC/{{regn["name"]}}/{{resln["name"]}}/{{mod["name"]}}/lfric_outputs
+            [[[directives]]]
+                -l ncpus={{POSTPROCESS_NPROCS}}
+                -l mem={{POSTPROCESS_NPROCS*GB_PER_CORE}}GB
+                -l storage=gdata/access+gdata/hr22+gdata/ki32+scratch/access+gdata/{{environ.get('PROJECT','NO_PROJECT')}}
+                {% endfor %} {# CRUN #}
+
+        {% endfor %} {# mod #}
+    {% endfor %} {# resln #}
+{% endfor %} {# regn #}

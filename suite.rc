@@ -16,13 +16,10 @@
 {% set CYCLE_FREQ = "PT" ~ CYCLE_INT_HR ~ "H" %}
 {# below are needed for FREE_RUNning #}
 {% set CYCLE_PREV, CYCLE_NEXT = "-" ~ CYCLE_FREQ, "+" ~ CYCLE_FREQ %}
+{% set OUTDIR = dm_ec_ic_lbc_dir %}
+{% set EC_ANCIL_DIR = dm_ec_lam_ancil_dir %}
 
 
-{# Process the variables in rose-suite.conf into a dictionary specifying the properties
-of the driving model, DRV_MOD, and a triply-nested data structure, REGNS, that contains
-information about all the nested LAMs in this suite #}
-
-%include "suite-setup.rc"
 
 ###### Scheduling and dependencies ##################}
 
@@ -136,8 +133,8 @@ CURR_DATE=$(rose date -c)
     {# NCI only: Pre-process ERA5 to GRIB format #}
     inherit = None, HOST_HPC
         [[[environment]]]
-            ECCBFILE={{DRV_MOD["rundir"]}}/ec_cb000.tmp
-            MASK={{DRV_MOD["ec_lam_ancil_dir"]}}/qrparm.mask
+            ECCBFILE=$ROSE_DATAC/ec/um/ec_cb000.tmp
+            MASK={{ EC_ANCIL_DIR }}/qrparm.mask
             START=$(rose date -c -f %Y%m%d%H%M)
             TYPE={{NCI_HRES_ECCB}}
             ROSE_TASK_APP = nci_hres_eccb
@@ -147,12 +144,13 @@ CURR_DATE=$(rose date -c)
             export BARRA_DIR=$ROSE_DATA/etc/barra_r2
             export ERA_DIR=$ROSE_DATA/etc/era5_land
             """
+
     [[nci_era5grib_parallel]]
     inherit=None, HOST_HPC
     pre-script = mkdir -p $OUTDIR
     [[[ environment ]]]
-        OUTDIR={{DRV_MOD["dm_ec_ic_lbc_dir"]}}
-        MASK={{DRV_MOD["ec_lam_ancil_dir"]}}/qrparm.mask
+        OUTDIR={{ OUTDIR }}
+        MASK={{ EC_ANCIL_DIR }}/qrparm.mask
         START=$(rose date -c -f %Y%m%d%H%M)
         COUNT=25
         FREQ=3600
