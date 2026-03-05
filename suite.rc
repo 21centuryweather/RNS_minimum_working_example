@@ -1,0 +1,159 @@
+#!jinja2
+
+{#  Nesting suite set up - minimum working example #}
+
+{# Maximum number of cycles that can be active at any one time #}
+{% set MAX_ACTIVE_CYCLES = 3 %}
+
+{# Maximum number of tasks that can be active at any one time #}
+{% set MAX_ACTIVE_TASKS = 20 %}
+
+{# Set up suite cycling #}
+
+{% set DATES = [] %}
+{% set TRIAL_START_DATE = INITIAL_CYCLE_POINT %}
+{% set TRIAL_END_DATE =  FINAL_CYCLE_POINT %}
+{% set CYCLE_FREQ = "PT" ~ CYCLE_INT_HR ~ "H" %}
+{# below are needed for FREE_RUNning #}
+{% set CYCLE_PREV, CYCLE_NEXT = "-" ~ CYCLE_FREQ, "+" ~ CYCLE_FREQ %}
+
+
+{# Process the variables in rose-suite.conf into a dictionary specifying the properties
+of the driving model, DRV_MOD, and a triply-nested data structure, REGNS, that contains
+information about all the nested LAMs in this suite #}
+
+%include "suite-setup.rc"
+
+###### Scheduling and dependencies ##################}
+
+[cylc]
+    UTC mode = True
+    [[events]]
+        timeout          = P1D
+
+[scheduling]
+    initial cycle point = {{TRIAL_START_DATE}}
+    final cycle point   =  {{TRIAL_END_DATE}}
+    max active cycle points = {{MAX_ACTIVE_CYCLES}}
+    [[special tasks]]
+        sequential = housekeep_cycle
+
+    [[queues]]
+        [[[default]]]
+            limit = {{MAX_ACTIVE_TASKS}}
+
+    [[dependencies]]
+        [[[R1]]]
+             graph = """
+            install_cold_hpc
+            install_cold_hpc[^] => install_ec_startdata
+            install_cold_hpc => nci_hres_eccb
+            nci_era5grib_parallel
+            """
+
+       [[[+PT24H/PT24H]]]
+            graph = """
+            install_cold_hpc[^] => install_ec_startdata
+            install_cold_hpc => nci_hres_eccb
+            nci_era5grib_parallel
+            housekeep_cycle[-PT24H] => ec_linkprev
+            # Don't run nci_era5grib concurrently
+            nci_era5grib_parallel[-PT24H] => nci_era5grib_parallel
+            install_ec_startdata[-PT24H] => install_ec_startdata
+            """
+
+       [[[R1//+P0D]]]
+            graph = """
+            housekeep_cycle => housekeep_lastcycle  
+            """
+
+##### Runtime job definition and task families ######
+[runtime]
+    [[root]]
+        script = rose task-run -v --opt-conf-key='(nci-gadi)'
+        env-script = eval $(rose task-env)
+        [[[environment]]]
+            TMPDIR = $CYLC_TASK_WORK_DIR
+        [[[events]]]
+            mail events = retry, submission retry, failed, submission failed, submission timeout, timeout
+            submission timeout         = P1D
+    [[HOST_HPC]]
+        # Tasks that the run on HPC host or group.
+        [[[job]]]
+            execution retry delays = PT30M
+            submission retry delays = 3*PT5M,3*PT15M,3*PT30M
+    [[INSTALL_COLD]]
+        [[[environment]]]
+            ROSE_TASK_APP = install_cold
+            GLM_RESLN = dummy
+    [[install_cold_hpc]]
+        inherit = INSTALL_COLD, HOST_HPC
+        [[[environment]]]
+            ARCHIVE_SET_NAME = ${ROSE_SUITE_NAME}
+    [[POSTPROCESS]]
+        inherit = None, HOST_HPC
+        [[[job]]]
+            execution retry delays = PT15M, PT30M
+    [[ARCHIVE]]
+        inherit = None, HOST_HPC
+        [[[job]]]
+            execution retry delays = PT15M, PT15M, PT30M, PT60M, PT60M, PT180M, PT360M, PT360M, PT360M
+        [[[environment]]]
+            ARCHIVE_SET_NAME = ${ROSE_SUITE_NAME}
+    [[HOUSEKEEP]]
+        [[[job]]]
+            execution retry delays = PT15M, PT15M, PT30M, PT60M, PT60M, PT180M, PT360M, PT360M, PT360M
+    [[housekeep_cycle]]
+        inherit = HOUSEKEEP
+        env-script = """
+eval $(rose task-env)
+CURR_DATE=$(rose date -c)
+                 """
+        [[[environment]]]
+            CYCLE_OFFSET = -PT24H
+            HK_CYCLE = $CYCLE_OFFSET
+            ROSE_APP_OPT_CONF_KEYS=hkmstash
+            ROSE_TASK_APP = housekeep
+    [[housekeep_lastcycle]]
+        inherit = HOUSEKEEP
+        [[[environment]]]
+            CYCLE_OFFSET    = -PT24H
+            HK_CYCLE      = -PT0H
+            ROSE_APP_OPT_CONF_KEYS=hkmstash
+            ROSE_TASK_APP = housekeep
+
+    [[ec]]
+    [[install_ec_startdata]]
+        inherit = ec, ARCHIVE
+        pre-script = mkdir -p $ROSE_DATAC/ec/ics/
+          script = echo [INFO] no installing to be done because driving data is ECMWF forecast files.
+    [[ec_linkprev]]
+        inherit = ec, HOST_HPC
+        env-script = eval $(rose task-env --cycle-offset=PT24H)
+        script = linkprev_lbcdata $ROSE_DATACPT24H/ec/um/ $ROSE_DATAC/ec/um/
+
+    [[nci_hres_eccb]]
+    {# NCI only: Pre-process ERA5 to GRIB format #}
+    inherit = None, HOST_HPC
+        [[[environment]]]
+            ECCBFILE={{DRV_MOD["rundir"]}}/ec_cb000.tmp
+            MASK={{DRV_MOD["ec_lam_ancil_dir"]}}/qrparm.mask
+            START=$(rose date -c -f %Y%m%d%H%M)
+            TYPE={{NCI_HRES_ECCB}}
+            ROSE_TASK_APP = nci_hres_eccb
+            pre-script = """
+            module use /g/data/vk83/modules
+            module load conda/access-ram/2025.03.0
+            export BARRA_DIR=$ROSE_DATA/etc/barra_r2
+            export ERA_DIR=$ROSE_DATA/etc/era5_land
+            """
+    [[nci_era5grib_parallel]]
+    inherit=None, HOST_HPC
+    pre-script = mkdir -p $OUTDIR
+    [[[ environment ]]]
+        OUTDIR={{DRV_MOD["dm_ec_ic_lbc_dir"]}}
+        MASK={{DRV_MOD["ec_lam_ancil_dir"]}}/qrparm.mask
+        START=$(rose date -c -f %Y%m%d%H%M)
+        COUNT=25
+        FREQ=3600
+        # Nested LAM tasks.

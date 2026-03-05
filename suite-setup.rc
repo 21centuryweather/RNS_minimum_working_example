@@ -1,0 +1,355 @@
+{# ################### Store variables in rose-suite.conf in dictionaries ################### #}
+{% set EXPT_CALENDAR='gregorian' %}
+
+{# Specify build directories for LFRIC LAM forecasts #}
+{% if RUN_LFRIC_LAM | default(False) %}
+    {% if not BUILD_MODE == "custom" %}
+        {% set LFRIC_EXEC_DIR = "$CYLC_SUITE_SHARE_DIR" %}
+    {% endif %}
+{% endif %}
+
+{# First create a dictionary to store properties of the driving model specified in
+the rose-suite.conf. If a given property is trigger-ignored then it will be assigned
+a value of "none" by the custom filter get_variable #}
+
+{% if dm_name in ["ec","barra"] %}
+   {% set dm_RUN_MODE = "dummy" %}
+{% elif dm_name == "drv_ukv" %}   
+   {% set dm_RUN_MODE = "oper" %}
+{% endif %}
+
+{% set DRV_MOD = {} %}
+{% set DRV_MOD_ATTR_NAMES = ["name", "config","build_mode", "exec_dir", "resln", "nproc", "nregns", 
+                             "runlen", "ic_file", "UKCA_init_file", "lbc_files", "ec_cb_freq", "cb_freq", 
+                             "lbc_rain", "arch", "ec_lam_ancil_dir", "ec_ic_lbc_dir", "RUN_MODE",
+                             "NCI_DATA_SRC","nci_barra_ic","nci_barra_lbc","run_murk","ukv_lbcs"] %}
+{% for mod_attr_name in DRV_MOD_ATTR_NAMES %}
+    {% set mod_attr_val = ("dm_" + mod_attr_name)|get_variable() %}
+    {% do DRV_MOD.update({mod_attr_name: mod_attr_val}) %}
+{% endfor %}
+
+
+{#  Set FREE_RUN to false if  CASE_STUDIES=true  #}
+
+{% if CASE_STUDIES %}
+   {% set FREE_RUN = false %}
+{% endif %}
+
+{# Now create a data structure, REGNS, to hold all necessary information about the nested LAMs.
+REGNS is a list of dictionaries, one for each geographical region to be modelled using
+the nesting suite. Each of these dictionaries stores information about the region, such
+as the location of its centre, and a list of the different model resolutions (levels of
+nesting) to be used in each region. Each resolution is represented by a dictionary
+holding parameters necessary to describe it, such as the horizontal grid spacing and
+vertical level set, and a list of the different UM science configurations that will be
+run at this resolution. The properties of each model configuration are also stored in a
+dictionary #}
+{% set REGNS = [] %}
+{# Loop over geographical sub-regions #}
+{% for rg in range(1, DRV_MOD["nregns"] + 1) %}
+    {% set rgp = rg|pad(2,"0") %}
+    {% set REGN = {} %}
+    {% set REGN_ATTR_NAMES = ["name", "nreslns"] %}
+    {% for regn_attr_name in REGN_ATTR_NAMES %}
+        {% set regn_attr_val = ("rg" + rgp + "_" + regn_attr_name)|get_variable() %}
+        {% do REGN.update({regn_attr_name: regn_attr_val}) %}
+    {% endfor %}
+    {# Loop over resolutions for this region #}
+    {% do REGN.update({"reslns": []}) %}
+    {% for rs in range(1, REGN["nreslns"] + 1) %}
+        {% set rsp = rs|pad(2,"0") %}
+        {% set RESLN = {} %}
+        {% set RESLN_ATTR_NAMES = ["std_model", "name", "vargrid", "levset", "runlen", "3D_ancils", "arcl_dust_anc", "ancil_dir", "lfric_ancil_dir", "zon_avg_ozone", "lai_anc", "alb_anc", "nmods", "kscale", "ioproc", "downscale_ukv"] %}
+        {% set resln_attr_val1 = ("rg" + rgp + "_rs" + rsp + "_" + "std_model")|get_variable() %}        
+         {% for resln_attr_name in RESLN_ATTR_NAMES %}
+            {% set resln_attr_val = ("rg" + rgp + "_rs" + rsp + "_" + resln_attr_name)|get_variable() %}
+            {% do RESLN.update({resln_attr_name: resln_attr_val}) %}
+        {% endfor %}
+        {# Include specifics from chosen std_model #}
+        {% include 'suite-setup_dir/'+ resln_attr_val1 +'.rc' %}
+        {# Loop over models for this resolution #}
+        {% do RESLN.update({"models": []}) %}
+        {% for m in range(1, RESLN["nmods"] + 1) %}
+            {% set mp = m|pad(2,"0") %}
+            {% set MOD = {} %}
+            {% set MOD_ATTR_NAMES = ["name", "config", "lfric_exp_blending", "lfric_mix_mol", "lfric_nproc", "lfric_diagnostics", "lfric_arch", "progdust", "build_mode", "exec_dir", "dt", "raddt", "lbc_freq", "nproc", "ic_lbc_src", "arch", "stashpack","simim","simim_freq","sat_name","moruses"] %}
+            {% for mod_attr_name in MOD_ATTR_NAMES %}
+                {% set mod_attr_val = ("rg" + rgp + "_rs" + rsp + "_m" + mp + "_" + mod_attr_name)|get_variable() %}
+                {% do MOD.update({mod_attr_name: mod_attr_val}) %}
+            {% endfor %}
+            {# Store dictionary for this model in the list of models for this resolution #}
+            {% do RESLN["models"].append(MOD) %}
+        {% endfor %}
+        {# Store dictionary for this resolution in the list of resolutions for this region #}
+        {% do REGN["reslns"].append(RESLN) %}
+    {% endfor %}
+    {# Store dictionary for this region in the list of regions #}
+    {% do REGNS.append(REGN) %}
+{% endfor %}
+
+{# ############################# Driving model set up ############################# #}
+
+{# If doing a re-run, the location of the executable to use for the driving model is
+required. If this is not explicitly supplied, the default nesting suite location is
+assumed #}
+{% if BUILD_MODE == "spack" %}
+    {% do DRV_MOD.update({"exec_dir": "share/spack_build"}) %}
+{% elif not BUILD_MODE == "custom" %}
+    {% do DRV_MOD.update({"exec_dir": "share/fcm_make_um"}) %}
+{% else %}
+    {% do DRV_MOD.update({"exec_dir": EXEC_DIR }) %}
+{% endif %}
+
+{# Data directory for driving model. If doing a re-run, this defines where model output
+will be placed #}
+{% do DRV_MOD.update({"dirbase": get_dm_dirbase(DRV_MOD)}) %}
+{% do DRV_MOD.update({"rundir": DRV_MOD["dirbase"] ~ "um/"}) %}
+
+{% if FREE_RUN or USE_UKCA %}
+    {# Previous cycle dump and LBC directory #}
+    {% do DRV_MOD.update({"prev_ics": get_dm_dirbase(DRV_MOD, cycle_offset = CYCLE_INT_HR) ~ "ics/"}) %}
+    {% do DRV_MOD.update({"prev_lbcdata": get_dm_dirbase(DRV_MOD, cycle_offset = CYCLE_INT_HR) ~ "um/"}) %}
+{% endif %}
+
+{# Set up a dictionary specifying the driving model initial conditions (location
+and name of start dump) #}
+{% do DRV_MOD.update({"ics": {}}) %}
+{% do DRV_MOD["ics"].update({"dir": DRV_MOD["dirbase"] ~ "ics/"}) %}
+{% do DRV_MOD["ics"].update({"file": DRV_MOD["ics"]["dir"] ~ DRV_MOD["name"] ~ "_astart"}) %}
+
+{# If the driving model is the global model, force reconfiguration of the analysis when
+doing a re-run. For other choices of driving model, reconfiguration will not be done #}
+{% if ( DRV_MOD["name"] == "glm" and "rerun" in DRV_MOD["RUN_MODE"] ) or DRV_MOD["name"] == "ec" %}
+    {% do DRV_MOD.update({"recon": true}) %}
+{% else %}
+    {% do DRV_MOD.update({"recon": false}) %}
+{% endif %}
+
+{# Flag whether driving model cb files include the prognostic rain field. This
+information is used by CreateBC. Note that in all instances of 'dm_name' = 'glm'
+this will already be specified by lbc_rain in the rose-suite.conf #}
+{% if DRV_MOD["name"] != "glm" or DRV_MOD["name"] != "drv_ukv" %}
+    {% do DRV_MOD.update({"lbc_rain": false}) %}
+{% endif %}
+
+{# Work out run length and corresponding number of CRUNs #}
+{% if FREE_RUN %}
+    {# In free-running mode, the run length of all models must match the time
+    between successive cycles, CYCLE_INT_HR #}
+    {% do DRV_MOD.update({"runlen": CYCLE_INT_HR}) %}
+    {% for regn in REGNS %}
+        {% for resln in regn["reslns"] %}
+            {% do resln.update({"runlen": CYCLE_INT_HR}) %}
+            {% do resln.update({"n_cruns": (resln["runlen"] / CRUN_LEN)|int}) %}
+        {% endfor %}
+    {% endfor %}
+{% else %}
+    {# If the number of geographical regions is more than zero (i.e. nested
+    LAMs are to be run), then the driving model run length will be
+    trigger-ignored in the rose-suite.conf. It is then set equal to the maximum
+    LAM forecast length over all regions. If zero regions were specified (i.e.
+    driving model only), then nothing needs to be done as the driving model run
+    length is specified in the rose-suite.conf #}
+    {% if DRV_MOD["runlen"] is none %}
+        {% do DRV_MOD.update({"runlen": 0}) %}
+    {% endif %}
+    {% for regn in REGNS %}
+        {% for resln in regn["reslns"] %}
+            {% do resln.update({"n_cruns": (resln["runlen"] / CRUN_LEN)|int}) %}
+            {% if resln["runlen"] > DRV_MOD["runlen"] %}
+                {% do DRV_MOD.update({"runlen": resln["runlen"]}) %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+{% endif %}
+{% do DRV_MOD.update({"n_cruns": (DRV_MOD["runlen"] / CRUN_LEN)|int}) %}
+
+{% if USE_UKCA %}
+  {% do DRV_MOD.update({"cycle_period": CYCLE_INT_HR}) %}
+{% endif %}
+
+{# For EC driving model 
+set up n_lbcs so that can set up correct number of driving model recon jobs.
+3600 on numerator is to account for cb_freq being in minutes. #}
+{% if  DRV_MOD["name"] == "ec" %}
+   {% do DRV_MOD.update({"n_lbcs": ((DRV_MOD["runlen"] * 3600 / DRV_MOD["ec_cb_freq"]) + 1 )|int}) %}
+{% endif %}
+
+{# If a Met Office operational model is being used to drive the nesting suite, then
+the frequency of LBC creation files is fixed and typically depends on lead time.
+Store the appropriate value for the chosen model #}
+{% if DRV_MOD["RUN_MODE"] == "oper" %}
+    {% if DRV_MOD["runlen"] <= 120 %}
+        {% do DRV_MOD.update({"cb_freq": 3600}) %}
+    {% else %}
+        {% do DRV_MOD.update({"cb_freq": 10800}) %}
+    {% endif %}
+{% endif %}
+
+{# If re-running the driving model, turn on the CreateBC macro if required #}
+{% if "rerun" in DRV_MOD["RUN_MODE"] and DRV_MOD["cb_freq"] > 0 %}
+    {% do DRV_MOD.update({"cb_on": true}) %}
+{% else %}
+    {% do DRV_MOD.update({"cb_on": false}) %}
+{% endif %}
+
+{# ############################# Ancillary File set up ############################# #}
+
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+        {# User-supplied ancillary versions file #}
+        {% do resln.update({"ancildir": resln["ancil_dir"]}) %}
+        {% if resln["zon_avg_ozone"] is none %}
+            {# Unless specified otherwise in the rose-suite.conf, the ozone
+            ancillary field is assumed to be not zonally-averaged, the default
+            behaviour of the nesting suite #}
+            {% do resln.update({"zon_avg_ozone": false}) %}
+        {% endif %}
+        {% if RUN_LFRIC_LAM | default(False) %}
+        {% do resln.update({"lfric_ancildir": resln["lfric_ancil_dir"]}) %}
+        {% endif %}
+    {% endfor %}
+{% endfor %}
+
+{# ############################# Nested LAM set up ############################# #}
+
+{# Set up the location of the executables to be used by the nested LAMs #}
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+        {% for mod in resln["models"] %}
+            {% if BUILD_MODE == "spack" %}
+                 {% do mod.update({"exec_dir": "share/spack_build"}) %}
+            {% elif not BUILD_MODE == "custom" %}
+                 {# Use the nesting suite default exec location #}
+                 {% do mod.update({"exec_dir": "share/fcm_make_um"}) %}
+            {% else %}
+                 {% do mod.update({"exec_dir": EXEC_DIR }) %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+{% endfor %}
+
+{# Determine which nested LAMs have the driving model as their parent #}
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+        {% for mod in resln["models"] %}
+            {# Initially assume reconfiguration/CreateBC will be done for this model #}
+            {% do mod.update({"recon": true}) %}
+            {% do mod.update({"createbc": true}) %}
+            {# The two entries in the tuple ic_lbc_src are the nesting level
+            (resolution) and model number of the (parent) model supplying
+            ICs/LBCs for this model. If ic_lbc_src is undefined
+            (trigger-ignored) for this model, or equal to (0, X), then this
+            means the parent of this model is the driving model #}
+            {% if mod["ic_lbc_src"] is none or mod["ic_lbc_src"][0] == 0 %}
+                {% do mod.update({"ic_lbc_src": DRV_MOD["name"]}) %}
+            {% else %}
+                {# If this model has a parent model at the same resolution,
+                then it is unncecessary to run reconfiguration/CreateBC since a
+                link to the parent model's initial/boundary conditions can be
+                made instead #}
+                {% set parent_resln = (regn|get_parent(mod))["resln"] %}
+                {% if parent_resln["name"] == resln["name"] %}
+                    {% do mod.update({"recon": false}) %}
+                    {% do mod.update({"createbc": false}) %}
+                {% endif %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+{% endfor %}
+
+{# Turn on CreateBC macro for regional models #}
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+        {% for mod in resln["models"] %}
+            {% if mod["lbc_freq"][1] > 0 %}
+                {% do mod.update({"cb_on": true}) %}
+            {% else %}
+                {% do mod.update({"cb_on": false}) %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+{% endfor %}
+
+{# All necessary directories and file names for the nested LAMs. This saves subsequent
+repetition of lengthy path names all over the suite #}
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+        {% for mod in resln["models"] %}
+
+            {# Directory where model output will be placed #}
+            {% do mod.update({"dirbase": get_lam_dirbase(regn, resln, mod)}) %}
+            {% do mod.update({"rundir": mod["dirbase"] ~ "um/"}) %}
+            {% do mod.update({"lfric_rundir": mod["dirbase"] ~ "lfric/"}) %}
+
+            {% if FREE_RUN or USE_UKCA %}
+                {# Previous cycle dump #}
+                {% do mod.update({"prev_ics": get_lam_dirbase(regn, resln, mod, cycle_offset = CYCLE_INT_HR) ~ "ics/"}) %}
+            {% endif %}
+
+            {# Initial conditions #}
+            {% do mod.update({"ics": {}}) %}
+            {# Location of the data for making initial conditions for this model #}
+            {% if mod["ic_lbc_src"] == DRV_MOD["name"] %}
+                {% do mod["ics"].update({"src_dir": DRV_MOD["ics"]["dir"]}) %}
+                {% do mod["ics"].update({"src_file": DRV_MOD["ics"]["file"]}) %}
+            {% else %}
+                {% set parent_resln = (regn|get_parent(mod))["resln"] %}
+                {% set parent_mod = (regn|get_parent(mod))["model"] %}
+                {% do mod["ics"].update({"src_dir": get_lam_dirbase(regn, parent_resln, parent_mod) ~ "ics/"}) %}
+                {% do mod["ics"].update({"src_file": mod["ics"]["src_dir"] ~ parent_mod["name"] ~ "_astart"}) %}
+            {% endif %}
+            {# Location of initial conditons for this model #}
+            {% do mod["ics"].update({"dir": mod["dirbase"] ~ "ics/"}) %}
+            {% do mod["ics"].update({"file": mod["ics"]["dir"] ~ mod["name"] ~ "_astart"}) %}
+
+            {# LBCs #}
+            {% do mod.update({"lbcs": {}}) %}
+            {% if mod["createbc"] %}
+                {# Location of data for the generation of LBCs for this model #}
+                {% if mod["ic_lbc_src"] == DRV_MOD["name"] %}
+                    {% do mod["lbcs"].update({"src_dir": DRV_MOD["rundir"]}) %}
+                {% else %}
+                    {% set parent_resln = (regn|get_parent(mod))["resln"] %}
+                    {% set parent_mod = (regn|get_parent(mod))["model"] %}
+                    {% do mod["lbcs"].update({"src_dir": get_lam_dirbase(regn, parent_resln, parent_mod) ~ "um/"}) %}
+                {% endif %}
+                {% do mod["lbcs"].update({"src_filebase": mod["lbcs"]["src_dir"] ~ "*_cb"}) %}
+            {% else %}
+                {# This model will use existing LBCs for another model at the same resolution #}
+                {% set parent_resln = (regn|get_parent(mod))["resln"] %}
+                {% set parent_mod = (regn|get_parent(mod))["model"] %}
+                {% do mod["lbcs"].update({"src_dir": get_lam_dirbase(regn, parent_resln, parent_mod) ~ "lbcs/"}) %}
+                {% do mod["lbcs"].update({"src_filebase": mod["lbcs"]["src_dir"] ~ parent_mod["name"] ~ "_alabc"}) %}
+                {% if MAKE_FRAMES %} 
+                   {% do mod["lbcs"].update({"src_framefilebase": mod["lbcs"]["src_dir"] ~ parent_mod["name"] ~ "_frame"}) %}
+                {% endif %}
+            {% endif %}
+            {# Location of LBCs for this model #}
+            {% do mod["lbcs"].update({"dir":  mod["dirbase"] ~ "lbcs/"}) %}
+            {% do mod["lbcs"].update({"filebase": mod["lbcs"]["dir"] ~ mod["name"] ~ "_alabc"}) %}
+{% if MAKE_FRAMES %} 
+            {% do mod["lbcs"].update({"framefilebase": mod["lbcs"]["dir"] ~ mod["name"] ~ "_frame"}) %}
+{% endif %}
+        {% endfor %}
+    {% endfor %}
+{% endfor %}
+
+{# Flag which nested LAMs will have prognostic rain in their input LBCs. This is usually
+the case, but may not be if the driving model did not output this field #}
+{% for regn in REGNS %}
+    {% for resln in regn["reslns"] %}
+        {% for mod in resln["models"] %}
+            {% if mod["createbc"] %}
+                {% if mod["ic_lbc_src"] == DRV_MOD["name"] %}
+                    {% do mod.update({"lbc_rain": DRV_MOD["lbc_rain"]}) %}
+                {% else %}
+                    {% do mod.update({"lbc_rain": true}) %}
+                {% endif %}
+            {% else %}
+                {% set parent_mod = (regn|get_parent(mod))["model"] %}
+                {% do mod.update({"lbc_rain": parent_mod["lbc_rain"]}) %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+{% endfor %}
