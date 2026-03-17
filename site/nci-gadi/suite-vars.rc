@@ -1,3 +1,0 @@
-{% set ONE_STEP_BUILD=false %}
-{% set MOOSE_ONLY = "" %}
-{% set KGO_DIR = "" %}

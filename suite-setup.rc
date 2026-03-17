@@ -1,11 +1,22 @@
 {# ################### Store variables in rose-suite.conf in dictionaries ################### #}
 {% set EXPT_CALENDAR='gregorian' %}
 
+{# Specify build directories for LFRIC LAM forecasts #}
+{% if RUN_LFRIC_LAM | default(False) %}
+    {% if not BUILD_MODE == "custom" %}
+        {% set LFRIC_EXEC_DIR = "$CYLC_SUITE_SHARE_DIR" %}
+    {% endif %}
+{% endif %}
+
 {# First create a dictionary to store properties of the driving model specified in
 the rose-suite.conf. If a given property is trigger-ignored then it will be assigned
 a value of "none" by the custom filter get_variable #}
 
-{% set dm_RUN_MODE = "dummy" %}
+{% if dm_name in ["ec","barra"] %}
+   {% set dm_RUN_MODE = "dummy" %}
+{% elif dm_name == "drv_ukv" %}   
+   {% set dm_RUN_MODE = "oper" %}
+{% endif %}
 
 {% set DRV_MOD = {} %}
 {% set DRV_MOD_ATTR_NAMES = ["name", "config","build_mode", "exec_dir", "resln", "nproc", "nregns", 
@@ -17,7 +28,12 @@ a value of "none" by the custom filter get_variable #}
     {% do DRV_MOD.update({mod_attr_name: mod_attr_val}) %}
 {% endfor %}
 
-{{ DRV_MOD | dictsort | join(', ') }}
+
+{#  Set FREE_RUN to false if  CASE_STUDIES=true  #}
+
+{% if CASE_STUDIES %}
+   {% set FREE_RUN = false %}
+{% endif %}
 
 {# Now create a data structure, REGNS, to hold all necessary information about the nested LAMs.
 REGNS is a list of dictionaries, one for each geographical region to be modelled using
@@ -49,10 +65,8 @@ dictionary #}
             {% set resln_attr_val = ("rg" + rgp + "_rs" + rsp + "_" + resln_attr_name)|get_variable() %}
             {% do RESLN.update({resln_attr_name: resln_attr_val}) %}
         {% endfor %}
-
         {# Include specifics from chosen std_model #}
         {% include 'suite-setup_dir/'+ resln_attr_val1 +'.rc' %}
-      
         {# Loop over models for this resolution #}
         {% do RESLN.update({"models": []}) %}
         {% for m in range(1, RESLN["nmods"] + 1) %}

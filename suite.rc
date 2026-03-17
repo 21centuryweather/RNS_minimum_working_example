@@ -1,5 +1,8 @@
 #!jinja2
 
+{# Macros used in this suite #}
+%include "suite-macros.rc"
+
 {# Process the variables in rose-suite.conf into a dictionary specifying the properties
 of the driving model, DRV_MOD, and a triply-nested data structure, REGNS, that contains
 information about all the nested LAMs in this suite #}
