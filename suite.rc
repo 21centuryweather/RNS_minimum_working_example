@@ -56,6 +56,7 @@
         [[[R1]]]
              graph = """
             install_cold_hpc
+            install_cold_hpc[^] => install_ec_startdata
             """
 
 
@@ -83,6 +84,30 @@
             
     [[install_cold_hpc]]
         inherit = INSTALL_COLD, HOST_HPC
+        [[[environment]]]
+            ARCHIVE_SET_NAME = ${ROSE_SUITE_NAME}
+
+    [[ec]]
+    [[install_ec_startdata]]
+        inherit = ec, ARCHIVE
+        pre-script = mkdir -p $ROSE_DATAC/ec/ics/
+        script = echo [INFO] no installing to be done because driving data is ECMWF forecast files.
+    [[ec_linkprev]]
+        inherit = ec, HOST_HPC
+        env-script = eval $(rose task-env --cycle-offset=PT24H)
+        script = linkprev_lbcdata $ROSE_DATACPT24H/ec/um/ $ROSE_DATAC/ec/um/
+
+    {# Postprocessing task family #}
+    [[POSTPROCESS]]
+        inherit = None, HOST_HPC
+        [[[job]]]
+            execution retry delays = PT15M, PT30M
+
+    {# Archiving task family #}
+    [[ARCHIVE]]
+        inherit = None, HOST_HPC
+        [[[job]]]
+            execution retry delays = PT15M, PT15M, PT30M, PT60M, PT60M, PT180M, PT360M, PT360M, PT360M
         [[[environment]]]
             ARCHIVE_SET_NAME = ${ROSE_SUITE_NAME}
 
