@@ -1,17 +1,38 @@
 #!jinja2
 
-{# Macros used in this suite #}
-%include "suite-macros.rc"
-
-{# Process the variables in rose-suite.conf into a dictionary specifying the properties
-of the driving model, DRV_MOD, and a triply-nested data structure, REGNS, that contains
-information about all the nested LAMs in this suite #}
-%include "suite-setup.rc"
+{# ###################### Nesting suite set up ######################### #}
 
 {# IF a rose-app-SITE.conf exists for a site, use it.#}
 {% set TASK_RUN_COMMAND = "rose task-run -v --opt-conf-key='(" + SITE + ")' " %}
 
 {# Site-specific details that add to (or override) the core suite definition. #}
+
+{# Maximum number of cycles that can be active at any one time #}
+{% set MAX_ACTIVE_CYCLES = 3 %}
+
+{# Maximum number of tasks that can be active at any one time #}
+{% set MAX_ACTIVE_TASKS = 20 %}
+
+{# Set up suite cycling #}
+{% set DATES = [] %}
+{% set TRIAL_START_DATE = INITIAL_CYCLE_POINT %}
+{% set TRIAL_END_DATE =  FINAL_CYCLE_POINT %}
+{% set CYCLE_FREQ = "PT" ~ CYCLE_INT_HR ~ "H" %}
+{# below are needed for FREE_RUNning #}
+{% set CYCLE_PREV, CYCLE_NEXT = "-" ~ CYCLE_FREQ, "+" ~ CYCLE_FREQ %}
+
+{# Macro for setting housekeeping option options #}
+{% macro hs_opt() -%}
+   {%- set opts = [] -%}
+   {%- if HK_RUN[0] -%}
+      {%- if HK_RUN[1] -%}
+         {%- do opts.append("hkall") -%}
+      {%- else -%}
+         {%- do opts.append("hkmstash") -%} 
+      {% endif %}
+   {%- endif -%}  
+{{opts|join(" ")}}
+{%- endmacro %}
 
 ###### Scheduling and dependencies ##################}
 
@@ -46,6 +67,15 @@ information about all the nested LAMs in this suite #}
         [[[environment]]]
             TMPDIR = $CYLC_TASK_WORK_DIR
 
+    [[HOST_LOCAL]]
+        # Tasks that run on the suite host or group.
+
+    [[HOST_HPC]]
+        # Tasks that the run on HPC host or group.
+        [[[job]]]
+            execution retry delays = PT30M
+            submission retry delays = 3*PT5M,3*PT15M,3*PT30M
+
     [[INSTALL_COLD]]
         [[[environment]]]
             ROSE_TASK_APP = install_cold
@@ -54,5 +84,32 @@ information about all the nested LAMs in this suite #}
     [[install_cold_hpc]]
         inherit = INSTALL_COLD, HOST_HPC
         [[[environment]]]
-            command = echo 'hello world'
+            ARCHIVE_SET_NAME = ${ROSE_SUITE_NAME}
+
+    {# Housekeeping task family #}
+    [[HOUSEKEEP]]
+        inherit = None, HOST_LOCAL
+        [[[job]]]
+            execution retry delays = PT15M, PT15M, PT30M, PT60M, PT60M, PT180M, PT360M, PT360M, PT360M
+
+    {# This housekeeping task applies to complete cycles rather than individual CRUNs #}
+    [[housekeep_cycle]]
+        inherit = HOUSEKEEP
+        env-script = """
+            eval $(rose task-env)
+            CURR_DATE=$(rose date -c)
+            """
+        [[[environment]]]
+            CYCLE_OFFSET = {{CYCLE_PREV}}
+            HK_CYCLE = $CYCLE_OFFSET
+            ROSE_APP_OPT_CONF_KEYS={{hs_opt()}}
+            ROSE_TASK_APP = housekeep
+
+    [[housekeep_lastcycle]]
+        inherit = HOUSEKEEP
+        [[[environment]]]
+            CYCLE_OFFSET  = {{CYCLE_PREV}}
+            HK_CYCLE      = $CYCLE_OFFSET
+            ROSE_APP_OPT_CONF_KEYS={{hs_opt()}}
+            ROSE_TASK_APP = housekeep
  
