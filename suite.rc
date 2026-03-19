@@ -71,7 +71,9 @@
                 install_ec_startdata => ec_um_recon_{{lbc}} => Region_Resolution_Model_LBCS_um_createbc_000
             {% endfor %}
 
-            {% for cr in range(1,n_cruns) %}
+            ec_um_recon_000  =>  nci_hres_eccb => Region_Resolution_Model_um_recon => nci_hres_ic => Region_Resolution_Model_um_fcst_000
+
+            {% for cr in range(0,n_cruns) %}
                 {% set crp = cr|pad(3,"0") %}
                 Region_Resolution_Model_LBCS_um_createbc_000 => Region_Resolution_Model_LBCS_um_createbc_{{crp}}
             {% endfor %} 
@@ -86,6 +88,11 @@
                 install_ec_startdata => ec_um_recon_{{lbc}} => ec_linkprev
                 nci_era5grib_parallel => ec_um_recon_{{lbc}}
             {% endfor %}
+
+            {% for cr in range(1,n_cruns) %}
+                {% set crp = cr|pad(3,"0") %}
+                ec_linkprev => Region_Resolution_Model_LBCS_um_createbc_{{crp}}
+            {% endfor %} 
             """
         [[[R1//+P0D]]]
             graph = """
