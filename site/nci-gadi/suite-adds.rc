@@ -349,33 +349,6 @@
                     pre-script = module use ~access/modules; module load pythonlib/mule
             {% endif %}
 
-#
-# Need local build of SimImProg_RunRTTOV.exe for simim tasks to work.
-#            {% if mod["simim"] %}
-#                [[{{model(regn, resln, mod)}}_SIMIMARC_HPC]]
-#                    inherit = HOST_HPC
-#                    init-script = export PATH=$PATH:/g/data/du7/chs548/rmed/utils/moose-client-wrapper
-#                    [[[directives]]]
-#                        -l ncpus = 2
-#                        -l mem = 118gb
-#        [[[job]]]
-#            execution time limit =  PT30M
-
-#                [[{{model(regn, resln, mod)}}_SIMIM_HPC]]
-#                    inherit = HOST_HPC
-#                    init-script = """
-#                        module use /g/data3/hh5/public/modules
-#                        module load conda/analysis3
-#                       export PYTHON_EXEC=python3
-#                    """
-#                    [[[directives]]]
-#                        -l ncpus = 32
-#                        -l mem = 118gb
-#                        -l storage = scratch/{{PROJECT}}+gdata/{{PROJECT}}+gdata/access+scratch/access+gdata/dp9+gdata/hh5
-#        [[[job]]]
-#            execution time limit =  PT55M
-#            {% endif %}
-
         {% endfor %}
     {% endfor %}
 {% endfor %}

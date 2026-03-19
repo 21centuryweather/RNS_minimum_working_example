@@ -34,8 +34,12 @@
 {{opts|join(" ")}}
 {%- endmacro %}
 
-{# For EC driving model set up n_lbcs so that can set up correct number of driving model recon jobs. Our EC data is stored in hourly files#}
-{% set n_lbcs = 24  %}
+{# Set the number of UM tasks/day #}
+{% set n_cruns = ( CYCLE_INT_HR/ CRUN_LEN)  | int %}
+
+{# For EC driving model set up n_lbcs so that can set up correct number of driving model 
+   recon jobs. Our EC data is stored in hourly files. We add '+1' so the jinja loop will run from 00 to 24 #}
+{% set n_lbcs = 24 + 1 %}
 
 ###### Scheduling and dependencies ##################}
 
@@ -61,8 +65,32 @@
             install_cold_hpc
             install_cold_hpc[^] => install_ec_startdata
             install_cold_hpc => nci_hres_eccb
-            """
+            {% for lb in range(n_lbcs) %}
+                {% set lbc = lb|pad(3,"0") %}
+                nci_era5grib_parallel => ec_um_recon_{{lbc}}
+                install_ec_startdata => ec_um_recon_{{lbc}} => Region_Resolution_Model_LBCS_um_createbc_000
+            {% endfor %}
 
+            {% for cr in range(1,n_cruns) %}
+                {% set crp = cr|pad(3,"0") %}
+                Region_Resolution_Model_LBCS_um_createbc_000 => Region_Resolution_Model_LBCS_um_createbc_{{crp}}
+            {% endfor %} 
+            
+            """   
+        [[[+PT24H/PT24H]]]
+            graph = """
+            install_cold_hpc[^] => install_ec_startdata
+            housekeep_cycle[-PT24H] 
+            {% for lb in range(n_lbcs) %}
+                {% set lbc = lb|pad(3,"0") %}
+                install_ec_startdata => ec_um_recon_{{lbc}} => ec_linkprev
+                nci_era5grib_parallel => ec_um_recon_{{lbc}}
+            {% endfor %}
+            """
+        [[[R1//+P0D]]]
+            graph = """
+            housekeep_cycle => housekeep_lastcycle
+        """
 
 ##### Runtime job definition and task families ######
 [runtime]
@@ -126,48 +154,49 @@
                 ROSE_APP_OPT_CONF_KEYS = $DUST_OPT $EC_OPT
                 ROSE_TASK_APP = glm_um
 
-        [[ec_um_recon]]
-        {% for lb in range(n_lbcs) %}
-        {% set lbc = lb|pad(3,"0") %}
-        {% set lbin  = ( lb  * dm_ec_cb_freq / 3600 ) |int %}
-        {% set lbint = lbin|pad(3,"0") %}
-                [[ec_um_recon_{{lbc}}]]
-                    # Settings for any DM reconfiguration task.
-                    inherit = ec_um_recon
-                    init-script = """
-                            eval $(rose task-env)
-                            set `cat {{dm_ec_lam_ancil_dir}}/grid_eg.nl`
-                            DELTA_LAT=`echo $3 | cut -d '=' -f2 | sed  's/,//;'`
-                            DELTA_LON=`echo $2 | cut -d '=' -f2 | sed  's/,//;'`
-                            FIRST_LAT=`echo $9 | cut -d '=' -f2 | sed  's/,//;'`
-                            FIRST_LON=`echo $7 | cut -d '=' -f2 | sed  's/,//;'`
-                            POLE_LAT=`echo ${10} | cut -d '=' -f2 | sed  's/,//;'`
-                            POLE_LON=`echo $8 | cut -d '=' -f2 | sed  's/,//;'`
-                            NPTS_Y=`echo ${12} | cut -d '=' -f2 | sed  's/,//;'`
-                            NPTS_X=`echo ${11} | cut -d '=' -f2 | sed  's/,//;'`
-                            NLEVS=`echo ${14}  | cut -d '=' -f2 | sed  's/,//;'`            
-                            NLEVSM1=$(( $NLEVS - 1 ))
-                            NLEVSM2=$(( $NLEVS - 2 ))
-                                """
-                    script = TASK_RUN_COMMAND --path="share/spack_build/*/bin" --command-key=recon
-                    [[[environment]]]
-                        DELTA_LAT=$DELTA_LAT
-                        DELTA_LON=$DELTA_LON
-                        FIRST_LAT=$FIRST_LAT
-                        FIRST_LON=$FIRST_LON
-                        POLE_LAT=$POLE_LAT
-                        POLE_LON=$POLE_LON
-                        NPTS_Y=$NPTS_Y
-                        NPTS_X=$NPTS_X
-                        VERT_LEV={{dm_ec_lam_ancil_dir}}/vertlevs.nl
-                        NLEVS=$NLEVS
-                        NLEVSM1=$NLEVSM1
-                        NLEVSM2=$NLEVSM2                 
-                        FDATE=$(rose date -c -f %Y%m%d%H%M --offset=PT{{lbint}}H)
-                        AINITIAL={{dm_ec_ic_lbc_dir}}/ec_grib_${FDATE}.t+000
-                        ASTART=$ROSE_DATAC/ec/um/ec_cb{{lbint}}
-                        RUN_END = 0,0,0,0,0,0
-            {% endfor %}
+            [[ec_um_recon]]
+            inherit = ec_um
+            {% for lb in range(n_lbcs) %}
+            {% set lbc = lb|pad(3,"0") %}
+            {% set lbin  = ( lb  * dm_ec_cb_freq / 3600 ) |int %}
+            {% set lbint = lbin|pad(3,"0") %}
+                    [[ec_um_recon_{{lbc}}]]
+                        # Settings for any DM reconfiguration task.
+                        inherit = ec_um_recon
+                        init-script = """
+                                eval $(rose task-env)
+                                set `cat {{dm_ec_lam_ancil_dir}}/grid_eg.nl`
+                                DELTA_LAT=`echo $3 | cut -d '=' -f2 | sed  's/,//;'`
+                                DELTA_LON=`echo $2 | cut -d '=' -f2 | sed  's/,//;'`
+                                FIRST_LAT=`echo $9 | cut -d '=' -f2 | sed  's/,//;'`
+                                FIRST_LON=`echo $7 | cut -d '=' -f2 | sed  's/,//;'`
+                                POLE_LAT=`echo ${10} | cut -d '=' -f2 | sed  's/,//;'`
+                                POLE_LON=`echo $8 | cut -d '=' -f2 | sed  's/,//;'`
+                                NPTS_Y=`echo ${12} | cut -d '=' -f2 | sed  's/,//;'`
+                                NPTS_X=`echo ${11} | cut -d '=' -f2 | sed  's/,//;'`
+                                NLEVS=`echo ${14}  | cut -d '=' -f2 | sed  's/,//;'`            
+                                NLEVSM1=$(( $NLEVS - 1 ))
+                                NLEVSM2=$(( $NLEVS - 2 ))
+                                    """
+                        script = TASK_RUN_COMMAND --path="share/spack_build/*/bin" --command-key=recon
+                        [[[environment]]]
+                            DELTA_LAT=$DELTA_LAT
+                            DELTA_LON=$DELTA_LON
+                            FIRST_LAT=$FIRST_LAT
+                            FIRST_LON=$FIRST_LON
+                            POLE_LAT=$POLE_LAT
+                            POLE_LON=$POLE_LON
+                            NPTS_Y=$NPTS_Y
+                            NPTS_X=$NPTS_X
+                            VERT_LEV={{dm_ec_lam_ancil_dir}}/vertlevs.nl
+                            NLEVS=$NLEVS
+                            NLEVSM1=$NLEVSM1
+                            NLEVSM2=$NLEVSM2                 
+                            FDATE=$(rose date -c -f %Y%m%d%H%M --offset=PT{{lbint}}H)
+                            AINITIAL={{dm_ec_ic_lbc_dir}}/ec_grib_${FDATE}.t+000
+                            ASTART=$ROSE_DATAC/ec/um/ec_cb{{lbint}}
+                            RUN_END = 0,0,0,0,0,0
+                {% endfor %}
 
     [[nci_hres_eccb]]
         [[[environment]]]
@@ -175,6 +204,34 @@
     [[nci_hres_ic]]
         [[[environment]]]
             ROSE_TASK_APP = nci_hres_ic
+
+    [[nci_era5grib_parallel]]
+        inherit=None, HOST_HPC
+        pre-script = mkdir -p $OUTDIR
+        [[[ environment ]]]
+            OUTDIR={{dm_ec_ic_lbc_dir}}
+            MASK={{dm_ec_lam_ancil_dir}}/qrparm.mask
+            START=$(rose date -c -f %Y%m%d%H%M)
+            COUNT=25
+            FREQ=3600
+
+    {# UM task family #}
+    [[Region_Resolution_Model]]
+
+    [[CREATEBC]]
+        inherit = None, HOST_HPC
+
+    [[Region_Resolution_Model_CREATEBC]]
+    inherit = CREATEBC
+
+    [[Region_Resolution_Model_LBCS]]
+    inherit = Region_Resolution_Model, Region_Resolution_Model_CREATEBC
+        
+        {% for cr in range(n_cruns) %}
+            {% set crp = cr|pad(3,"0") %}
+            [[Region_Resolution_Model_LBCS_um_createbc_{{crp}}]]
+            inherit = Region_Resolution_Model_LBCS
+        {% endfor %}
 
     {# Postprocessing task family #}
     [[POSTPROCESS]]
