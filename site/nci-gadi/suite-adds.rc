@@ -144,7 +144,7 @@
         [[[ directives ]]]
             -l mem = 20gb
 
-    [[install_cold_hpc{{MOOSE_ONLY}}]]
+    [[install_cold_hpc]]
         [[[ job ]]]
             batch system = background
 
@@ -235,47 +235,38 @@
             execution time limit =  PT2H
 {% endif %}
 
-{% if DRV_MOD["recon"] %}
-    [[{{DRV_MOD["name"]}}_um_recon]]
-        {{recon_resources(RCF_NPROCX,RCF_NPROCY,RCF_MEM)}}
 
-    {% if DRV_MOD["name"] == "ec" %}
-      {% for lb in range(DRV_MOD["n_lbcs"]) %}
+[[ec_um_recon]]
+    {{recon_resources(RCF_NPROCX,RCF_NPROCY,RCF_MEM)}}
+
+    {% for lb in range(n_lbcs) %}
         {% set lbc = lb|pad(3,"0") %}
-    [[{{DRV_MOD["name"]}}_um_recon_{{lbc}}]]
-        init-script = """
-            {{UM_ENV()}}
-        """
-        env-script = """
-            eval $(rose task-env)
-            DUST_OPT=
-            EC_OPT=
-            DATE=$(rose date -c -f %Y%m%d%H%M)
-            {% if DRV_MOD["name"] != "ec" %}
-              if [[ $DATE -lt 201107201200 ]]; then
-                DUST_OPT=nodust
-              fi
-            {% else %}
-               DUST_OPT=nodust
-               EC_OPT=ec
-            {% endif %}
-            set `cat {{DRV_MOD["ec_lam_ancil_dir"]}}/grid_eg.nl`
-            DELTA_LAT=`echo $3 | cut -d '=' -f2 | sed  's/,//;'`
-            DELTA_LON=`echo $2 | cut -d '=' -f2 | sed  's/,//;'`
-            FIRST_LAT=`echo $9 | cut -d '=' -f2 | sed  's/,//;'`
-            FIRST_LON=`echo $7 | cut -d '=' -f2 | sed  's/,//;'`
-            POLE_LAT=`echo ${10} | cut -d '=' -f2 | sed  's/,//;'`
-            POLE_LON=`echo $8 | cut -d '=' -f2 | sed  's/,//;'`
-            NPTS_Y=`echo ${12} | cut -d '=' -f2 | sed  's/,//;'`
-            NPTS_X=`echo ${11} | cut -d '=' -f2 | sed  's/,//;'`
-            NLEVS=`echo ${14}  | cut -d '=' -f2 | sed  's/,//;'`            
-            NLEVSM1=$(( $NLEVS - 1 ))
-            NLEVSM2=$(( $NLEVS - 2 ))
+            [[ec_um_recon_{{lbc}}]]
+            init-script = """
+                {{UM_ENV()}}
             """
-      {% endfor %}
-    {% endif %}
+            env-script = """
+                eval $(rose task-env)
+                DUST_OPT=
+                EC_OPT=
+                DATE=$(rose date -c -f %Y%m%d%H%M)
+                DUST_OPT=nodust
+                EC_OPT=ec
+                set `cat {{dm_ec_lam_ancil_dir}}/grid_eg.nl`
+                DELTA_LAT=`echo $3 | cut -d '=' -f2 | sed  's/,//;'`
+                DELTA_LON=`echo $2 | cut -d '=' -f2 | sed  's/,//;'`
+                FIRST_LAT=`echo $9 | cut -d '=' -f2 | sed  's/,//;'`
+                FIRST_LON=`echo $7 | cut -d '=' -f2 | sed  's/,//;'`
+                POLE_LAT=`echo ${10} | cut -d '=' -f2 | sed  's/,//;'`
+                POLE_LON=`echo $8 | cut -d '=' -f2 | sed  's/,//;'`
+                NPTS_Y=`echo ${12} | cut -d '=' -f2 | sed  's/,//;'`
+                NPTS_X=`echo ${11} | cut -d '=' -f2 | sed  's/,//;'`
+                NLEVS=`echo ${14}  | cut -d '=' -f2 | sed  's/,//;'`            
+                NLEVSM1=$(( $NLEVS - 1 ))
+                NLEVSM2=$(( $NLEVS - 2 ))
+                """
+    {% endfor %}
 
-{% endif %}
 
 {% if NCI_HRES_ECCB != "none" %}
     [[nci_hres_eccb]]
@@ -313,45 +304,24 @@
             execution time limit =  PT15M
 {% endif %}
 
-{% if "rerun" in DRV_MOD["RUN_MODE"] %}
-    [[{{DRV_MOD["name"]}}_um_fcst]]
+
+[[Region_Resolution_Model_um]]
+    init-script = """
+        {{UM_ENV()}}
+    """
+    {{atmos_resources(rg01_rs01_m01_nproc[0],rg01_rs01_m01_nproc[1],UM_ATM_OMP,UM_ATM_MEM)}}
+
+    [[Region_Resolution_Model_um_recon]]
         init-script = """
             {{UM_ENV()}}
-            """
-        {{atmos_resources(dm_nproc[1],dm_nproc[0],UM_ATM_OMP,UM_ATM_MEM)}}
-{% endif %}
+            module unload python2-as-python
+            module load python3-as-python
+        """
+        {{recon_resources(RCF_NPROCX,RCF_NPROCY,RCF_MEM)}}
 
-{% for regn in REGNS %}
-    {% for resln in regn["reslns"] %}
+    [[Region_Resolution_Model_um_recon_cyclen]]
+        {{recon_resources(RCF_NPROCX,RCF_NPROCY,RCF_MEM)}}
 
-        {% for mod in resln["models"] %}
-            [[{{model(regn, resln, mod)}}_um]]
-                init-script = """
-                    {{UM_ENV()}}
-                """
-                {{atmos_resources(mod['nproc'][1],mod['nproc'][0],UM_ATM_OMP,UM_ATM_MEM)}}
-
-            {% if mod["recon"] %}
-                [[{{model(regn, resln, mod)}}_um_recon]]
-                    init-script = """
-                        {{UM_ENV()}}
-                        module unload python2-as-python
-                        module load python3-as-python
-                    """
-                    {{recon_resources(RCF_NPROCX,RCF_NPROCY,RCF_MEM)}}
-
-                [[{{model(regn, resln, mod)}}_um_recon_cyclen]]
-                    {{recon_resources(RCF_NPROCX,RCF_NPROCY,RCF_MEM)}}
-            {% endif %}
-
-            {% if mod["arch"][2] %}
-                [[{{model(regn, resln, mod)}}_convpp]]
-                    pre-script = module use ~access/modules; module load pythonlib/mule
-            {% endif %}
-
-        {% endfor %}
-    {% endfor %}
-{% endfor %}
 
 {# vim: filetype=htmljinja
 #}

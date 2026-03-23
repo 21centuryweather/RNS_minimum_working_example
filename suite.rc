@@ -5,8 +5,6 @@
 {# IF a rose-app-SITE.conf exists for a site, use it.#}
 {% set TASK_RUN_COMMAND = "rose task-run -v --opt-conf-key='(" + SITE + ")' " %}
 
-{# Site-specific details that add to (or override) the core suite definition. #}
-
 {# Maximum number of cycles that can be active at any one time #}
 {% set MAX_ACTIVE_CYCLES = 3 %}
 
@@ -40,6 +38,10 @@
 {# For EC driving model set up n_lbcs so that can set up correct number of driving model 
    recon jobs. Our EC data is stored in hourly files. We add '+1' so the jinja loop will run from 00 to 24 #}
 {% set n_lbcs = 24 + 1 %}
+
+{# Site-specific details that add to (or override) the core suite definition. #}
+{% include 'site/' + SITE + '/suite-adds.rc' %}
+
 
 ###### Scheduling and dependencies ##################}
 
@@ -191,21 +193,6 @@
                     [[ec_um_recon_{{lbc}}]]
                         # Settings for any DM reconfiguration task.
                         inherit = ec_um_recon
-                        init-script = """
-                                eval $(rose task-env)
-                                set `cat {{dm_ec_lam_ancil_dir}}/grid_eg.nl`
-                                DELTA_LAT=`echo $3 | cut -d '=' -f2 | sed  's/,//;'`
-                                DELTA_LON=`echo $2 | cut -d '=' -f2 | sed  's/,//;'`
-                                FIRST_LAT=`echo $9 | cut -d '=' -f2 | sed  's/,//;'`
-                                FIRST_LON=`echo $7 | cut -d '=' -f2 | sed  's/,//;'`
-                                POLE_LAT=`echo ${10} | cut -d '=' -f2 | sed  's/,//;'`
-                                POLE_LON=`echo $8 | cut -d '=' -f2 | sed  's/,//;'`
-                                NPTS_Y=`echo ${12} | cut -d '=' -f2 | sed  's/,//;'`
-                                NPTS_X=`echo ${11} | cut -d '=' -f2 | sed  's/,//;'`
-                                NLEVS=`echo ${14}  | cut -d '=' -f2 | sed  's/,//;'`            
-                                NLEVSM1=$(( $NLEVS - 1 ))
-                                NLEVSM2=$(( $NLEVS - 2 ))
-                                    """
                         script = TASK_RUN_COMMAND --path="share/spack_build/*/bin" --command-key=recon
                         [[[environment]]]
                             DELTA_LAT=$DELTA_LAT
@@ -229,6 +216,7 @@
     [[nci_hres_eccb]]
         [[[environment]]]
             ROSE_TASK_APP = nci_hres_eccb
+
     [[nci_hres_ic]]
         [[[environment]]]
             ROSE_TASK_APP = nci_hres_ic
