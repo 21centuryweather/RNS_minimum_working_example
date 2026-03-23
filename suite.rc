@@ -75,9 +75,14 @@
 
             {% for cr in range(0,n_cruns) %}
                 {% set crp = cr|pad(3,"0") %}
-                Region_Resolution_Model_LBCS_um_createbc_000 => Region_Resolution_Model_LBCS_um_createbc_{{crp}}
+                Region_Resolution_Model_um_recon => Region_Resolution_Model_um_fcst_{{crp}}
+                {% if crp != "000" %}
+                    Region_Resolution_Model_LBCS_um_createbc_000 => Region_Resolution_Model_LBCS_um_createbc_{{crp}} 
+                {% endif %}
             {% endfor %} 
             
+        Region_Resolution_Model_um_fcst_{{(n_cruns-1)|pad(3,"0")}} => housekeep_cycle
+
             """   
         [[[+PT24H/PT24H]]]
             graph = """
@@ -91,8 +96,24 @@
 
             {% for cr in range(1,n_cruns) %}
                 {% set crp = cr|pad(3,"0") %}
-                ec_linkprev => Region_Resolution_Model_LBCS_um_createbc_{{crp}}
+                ec_linkprev => Region_Resolution_Model_LBCS_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
             {% endfor %} 
+
+           {% for cr in range(0,n_cruns) %}
+               {% set crp = cr|pad(3,"0") %}
+               Region_Resolution_Model_um_recon_cyclen => Region_Resolution_Model_um_fcst_{{crp}}
+               {% if crp != "000" %}
+                   Region_Resolution_Model_LBCS_um_createbc_000 => Region_Resolution_Model_LBCS_um_createbc_{{crp}} 
+               {% endif %}
+           {% endfor %} 
+            
+            Region_Resolution_Model_um_fcst_{{(n_cruns-1)|
+            pad(3,"0")}} => housekeep_cycle
+
+            housekeep_cycle[-PT24H] => ec_linkprev
+            # Don't run nci_era5grib concurrently
+            nci_era5grib_parallel[-PT24H] => nci_era5grib_parallel
+            install_ec_startdata[-PT24H] => install_ec_startdata
             """
         [[[R1//+P0D]]]
             graph = """
@@ -223,22 +244,50 @@
             FREQ=3600
 
     {# UM task family #}
-    [[Region_Resolution_Model]]
-
     [[CREATEBC]]
         inherit = None, HOST_HPC
+    [[UM_LAM]]
+        # Settings for all LAM recon and forecast tasks.
+        inherit = HOST_HPC
+    [[UM_LAM_RECON]]
+        # Settings for all LAM recon tasks.
+        inherit = UM_LAM
+    [[UM_LAM_FCST]]
+        # Settings for all LAM forecast tasks.
+        inherit = UM_LAM
 
-    [[Region_Resolution_Model_CREATEBC]]
-    inherit = CREATEBC
+    [[Region_Resolution_Model]]
+    
+        [[Region_Resolution_Model_CREATEBC]]
+        inherit = CREATEBC
 
-    [[Region_Resolution_Model_LBCS]]
-    inherit = Region_Resolution_Model, Region_Resolution_Model_CREATEBC
-        
-        {% for cr in range(n_cruns) %}
-            {% set crp = cr|pad(3,"0") %}
-            [[Region_Resolution_Model_LBCS_um_createbc_{{crp}}]]
-            inherit = Region_Resolution_Model_LBCS
-        {% endfor %}
+        [[Region_Resolution_Model_LBCS]]
+        inherit = Region_Resolution_Model, Region_Resolution_Model_CREATEBC
+            
+            {% for cr in range(n_cruns) %}
+                {% set crp = cr|pad(3,"0") %}
+                [[Region_Resolution_Model_LBCS_um_createbc_{{crp}}]]
+                inherit = Region_Resolution_Model_LBCS
+            {% endfor %}
+
+        [[Region_Resolution_Model_um]]
+        inherit = Region_Resolution_Model
+
+            [[Region_Resolution_Model_um_recon]]
+            inherit = Region_Resolution_Model_um, UM_LAM_RECON
+
+            [[Region_Resolution_Model_um_recon_cyclen]]
+            inherit = Region_Resolution_Model_um, UM_LAM_RECON
+
+            [[Region_Resolution_Model_um_fcst]]
+            # Settings for all <model> LAM forecasts.
+             inherit = Region_Resolution_Model_um, UM_LAM_FCST
+             
+                {% for cr in range(n_cruns) %}
+                {% set crp = cr|pad(3,"0") %}
+                    [[Region_Resolution_Model_um_fcst_{{crp}}]]
+                    inherit = Region_Resolution_Model_um_fcst
+                {% endfor %}
 
     {# Postprocessing task family #}
     [[POSTPROCESS]]
