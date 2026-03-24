@@ -1,0 +1,416 @@
+#!/usr/bin/env python
+
+import os
+import re
+import sys
+import pytz
+import glob
+import argparse
+import subprocess 
+from datetime import datetime, timedelta
+import numpy as np
+
+def make_date(datestring):
+    """Returns a Python datetime object derived from a string 
+       describing a cycletime in ISO8601 format.
+    """
+    return datetime.strptime(datestring, '%Y%m%dT%H%MZ').replace(tzinfo=pytz.UTC)
+
+def insert_date(filename, cycletime):
+    """Inserts a cycletime into a filename. 
+
+       Arguments:
+         filename  -- the name of a file that contains some or all
+                      of the strings YYYY, mm, dd, HH and MM (representing 
+                      the year, month, day, hour and minute, respectively)
+                      that are to be replaced with the cycletime
+         cycletime -- the cycletime of interest in ISO8601 format
+       Returns:
+         The modified filename 
+    """
+    filename = filename.replace("YYYY", cycletime.strftime("%Y"))
+    filename = filename.replace("YY", cycletime.strftime("%Y")[0:2])
+    filename = filename.replace("mm", cycletime.strftime("%m"))
+    filename = filename.replace("dd", cycletime.strftime("%d"))
+    filename = filename.replace("HH", cycletime.strftime("%H"))
+    filename = filename.replace("MM", cycletime.strftime("%M"))
+    return filename
+
+def decode_hour(hour_code):
+    """Determines the total number of hours since the forecast basis time.
+
+       Arguments:
+         hour_code -- a 3-character (either a letter followed by 2 integers
+                      or 3 integers) relative total timestamp (see UMDP 007)     
+       Returns:
+         The total number of hours relative to the start of the forecast
+    """
+    pattern = re.compile('^[a-z0-9]\d{2}$')
+    matches = pattern.findall(hour_code)
+    if len(matches) != 1:
+        print("Error: Hour code must consist of either 3 integers or a letter followed by 2 integers. Exiting...")
+        sys.exit(1)  
+    # ord(c) - 87 for c = a, b,..., z maps a to 10, b to 11,..., z to 35
+    hour = int("".join([str(ord(c) - 87) if c.isalpha() else c for c in hour_code]))
+    return hour
+
+def sort_files(files):
+    """Sorts a list of files by time relative to the forecast basis time."""
+    # First strip off any file extensions
+    files_noext = []
+    for f in files:
+        while True:
+            f, ext = os.path.splitext(f)
+            if not ext:
+                files_noext.append(f)
+                break               
+ 
+    # Search for a 3-character (either 3 integers or a letter followed by 2 integers)
+    # relative timestamp at the end of each filename (without extension)
+    pattern = re.compile('[^0-9][a-z0-9]\d{2}$')
+    hour_codes = []
+    for f in files_noext:
+        fb = os.path.basename(f)
+        matches = pattern.findall(fb)
+        if len(matches) != 1:
+            print("Error: Cannot determine a unique relative timestamp from filename {0}. Exiting...".format(f))
+            sys.exit(1)
+        # Extract last 3 characters of the filename; this is the desired timestamp
+        hour_codes.append(matches[0][1:])
+    
+    # Decode each timestamp and sort the input files by time relative to the 
+    # forecast basis time (ascending order)
+    hours, sorted_hours, sorted_files = [], [], []
+    for hour_code in hour_codes:
+        hours.append(decode_hour(hour_code))
+    if hours:
+        sorted_hours, sorted_files = zip(*sorted(zip(hours, files)))
+        sorted_hours = list(sorted_hours)
+        sorted_files = list(sorted_files)
+    return sorted_hours, sorted_files
+
+def parse_args():
+    """Parses and returns command line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('datadir', help="Data directory")
+    parser.add_argument('cycletime', help="Desired cycletime in the format YYYYmmddTHHMMZ", type=make_date)
+    parser.add_argument('model', help="Driving model name")
+    parser.add_argument('start_hour', help="Start hour of LBC period", type=int)
+    parser.add_argument('end_hour', help="End hour of LBC period", type=int)
+    parser.add_argument('userfile', nargs='?', default=argparse.SUPPRESS)
+    parser.add_argument('--userfile', help="User-supplied LBC creation files", dest='userfile', default=None)
+    parser.add_argument('ukv_lbcs', nargs='?', default=argparse.SUPPRESS)
+    parser.add_argument('--ukv_lbcs', help="Model used for LBCs", dest='ukv_lbcs', default=None)
+    args = parser.parse_args()   
+    return args
+
+def get_oper_filenames(cycletime, model, ukv_lbc=False): 
+    """Get the names of LBC creation (cb) files produced by a specified 
+       operational model on the given date.
+
+       Arguments:
+         cycletime -- the cycletime of interest in ISO8601 format
+         model     -- operational model name
+       Keyword arguments:
+         ukv_lbc    -- set to true if the operational UKV is being used to 
+                     generate LBCs
+       Returns:
+         The names of LBC creation files that can be used to generate
+         boundary conditions for nested LAMs.
+    """
+    if not ukv_lbc:
+        # Global model data used for LBCs
+        opdir = "/critical/opfc/suites-oper/global/share/data/" + cycletime.strftime("%Y%m%dT%H%MZ") + "/glm_um/"
+        oplbcfiles = opdir + "umglaa_pb???"
+    elif ukv_lbc:
+        # UKV model data used for LBCs
+        opdir = "/critical/opfc/suites-oper/uk/share/data/" + cycletime.strftime("%Y%m%dT%H%MZ") + "/ukv_um/"
+        oplbcfiles = opdir + "umqvaa_pc???"
+    else:
+        # Support for other driving models will be added at a later date
+        print("No valid operational model name supplied. Exiting...")
+        sys.exit(1)
+    return oplbcfiles
+
+def list_archived_files(filebase):
+    """List files in the MASS archive.
+
+       Arguments:
+         filebase -- basename of files to search for in the archive        
+       Returns:
+         A list of files with basename filebase found in the archive.
+    """
+    cmd = ["moo", "ls", filebase]  
+    try:
+        files = subprocess.check_output(cmd).strip().split("\n")
+        if not files:
+            print("No files matching pattern {:s} in archive".format(filebase))
+            sys.exit(1)
+    except subprocess.CalledProcessError as ex:
+        print("Error listing files {:s}, MOOSE error code = {:d}".format(filebase, ex.returncode))
+        sys.exit(1)  
+    return files
+
+def list_archived_files_nci_barra(cycletime, start_hour, end_hour):
+    """List bc files in the NCI BARRA archive.
+
+       Arguments:
+         cycletime - task time
+         start_hour - forecast lead time
+         end_hour - forecast end time
+       Returns:
+         A list of files with the valid times.
+    """
+    file_list = []
+    for h in range(start_hour, end_hour+1):
+        valid_time = cycletime + timedelta(hours=h)
+        curr_day = datetime(valid_time.year, valid_time.month, valid_time.day)
+        if valid_time.hour >= 0 and valid_time.hour <= 5:
+            bt = curr_day
+            pi_hcode = 60*valid_time.hour
+        elif valid_time.hour >= 6 and valid_time.hour <= 11:
+            bt = curr_day + timedelta(hours=6)
+            pi_hcode = 60*(valid_time.hour - 6)
+        elif valid_time.hour >= 12 and valid_time.hour <= 17:
+            bt = curr_day + timedelta(hours=12)
+            pi_hcode = 60*(valid_time.hour - 12)
+        elif valid_time.hour >= 18 and valid_time.hour <= 23:
+            bt = curr_day + timedelta(hours=18)
+            pi_hcode = 60*(valid_time.hour - 18)
+
+        mdss_file = os.path.join('reana/prod/BARRA_R/v1/r*/misc/%04d/%02d/%s/ra_um/umeasa_pi_%05d' % (bt.year, bt.month, bt.strftime('%Y%m%dT%H%MZ'), pi_hcode))
+        project = 'du7'
+        cmd = ["mdss", "-P", project, "ls", mdss_file]
+        try:
+            files = subprocess.check_output(cmd).strip().split("\n")
+            if not files:
+                print("No files matching pattern {:s} in archive".format(filebase))
+                sys.exit(1)
+            else:
+                files.sort()
+                file_list.append(files[-1])
+        except subprocess.CalledProcessError as ex:
+            print("Error listing files {:s}, MDSS ls error code = {:d}".format(filebase, ex.returncode))
+            sys.exit(1)  
+
+    return file_list
+
+def retrieve_archived_files_nci_barra(src, dest):
+    """Retrieves files from the NCI tape archive."""   
+    project = 'du7'
+    if type(src) is not list:
+        src = [src]
+    # first check staging status
+    cmd = ["mdss", "-P", project, "dmls", "-l"] + src #, " ".join(src)]
+    try:
+        files = subprocess.check_output(cmd).strip().split("\n")
+    except subprocess.CalledProcessError as ex:
+        print("Error querying file(s) {:s}, MDSS dmls error code = {:d}".format(" ".join(src), ex.returncode))
+        sys.exit(1)
+
+    check = np.array([not 'DUL' in file for file in files])
+    stage_file = 'cb_stage.in_process'
+    if check.sum() > 0:
+        if os.path.exists(stage_file):
+            print("Still staging {:} files, failed to allow rerun of task at later time".format(check.sum()))
+            sys.exit(2)
+        else:
+            print("Start staging, failed to allow rerun of task at later time")
+            cmd = ["mdss", "-P", project, "stage"] + src
+            subprocess.check_call(cmd)
+            open(stage_file, 'a').close()
+            #Path(stage_file).touch()
+            sys.exit(2)
+
+    # completed staging
+    if os.path.exists(stage_file):
+        os.remove(stage_file)
+
+    # retrieve the files
+    for s, d in zip(src, dest):
+        cmd = ["mdss", "-P", project, 'get', s, d]
+        try:
+            subprocess.check_call(cmd)
+            print("Retrieved {:s} -> {:s}".format(s, d))
+        except subprocess.CalledProcessError as ex:
+            print("Error retrieving file(s) {:s}, MDSS get error code = {:d}".format(s, ex.returncode))
+            sys.exit(1)
+
+def retrieve_archived_files(src, dest):
+    """Retrieves files from the MASS archive."""   
+    if type(src) is not list:
+        src = [src]
+    src = " ".join(src)
+    cmd = ["moo get -f " + src + " " + dest]
+    try:
+        subprocess.check_call(cmd, shell=True)
+    except subprocess.CalledProcessError as ex:
+        print("Error retrieving file(s) {:s}, MOOSE error code = {:d}".format(src, ex.returncode))
+        sys.exit(1)  
+
+def link_to_file(src, dest):
+    """Creates a soft link to a file on disk."""
+    if not (os.path.isdir(src) or os.path.isfile(src)):
+        print("Source {:s} does not exist".format(src))
+        sys.exit(1)
+    elif os.path.islink(dest):
+        print("Link {:s} already exists".format(dest))
+    elif os.path.dirname(dest) == os.path.dirname(src):
+        print("Source {:s} already in directory".format(src))
+    else: 
+        os.symlink(src, dest)
+
+def get_mass_file_and_unpack(src, dest):
+    """Retrieves a file from MASS and uncompress it if necessary."""
+    inname = os.path.basename(src)
+    os.system('moo get -I -v ' + src + " .")
+
+    # Check if we have a tar file or multiple files
+    files = glob.glob(inname)
+
+    if (len(files) == 1 and os.path.splitext(files[0])[1] == ".gz"):
+        # Create a list with the files
+        f = subprocess.Popen(["tar", "-tf", files[0]], stdout=subprocess.PIPE)
+        filelist = f.stdout.read().decode('utf-8').split('\n')
+        #remove empty values from list
+        filelist=[x for x in filelist if x]
+
+        # Uncompress and delete the file 
+        os.system('tar -xzf ' + inname + ' -C ' + dest)
+        os.remove(inname)
+    else:
+        filelist = []
+        for f in files:
+            os.rename(f, os.path.join(dest, f))
+            filelist.append(os.path.join(dest,f))
+    return filelist
+
+def main(inarg):
+    """Retrieves or links to LBC creation files produced by an operational or 
+       user-specified driving model that are to be used for making boundary 
+       conditions for nested LAMs for the specified CRUN.
+
+       Command line arguments:
+         datadir    -- data directory for the cycletime of interest (typically 
+                       $ROSE_DATAC)
+         cycletime  -- cycletime in the ISO8601 format YYYYmmddTHHMMZ 
+         model      -- driving model name
+         start_hour -- forecast lead time at the start of the current CRUN (hours)
+         end_hour   -- forecast lead time at the end of the current CRUN (hours)
+       Command line keyword arguments:
+         userfile -- full path to custom LBC creation files to use, either on disk or 
+                     in the archive
+         ukv_lbcs -- operational model used to generate LBCs when DRV_MOD=drv_ukv
+    """
+    # Parse command line arguments
+    args = parse_args()
+
+    # This is where the retrieved LBC data will be placed
+    destdir = args.datadir + "/" + args.model + "/um"
+    if not os.path.isdir(destdir):
+        os.makedirs(destdir) 
+
+    if args.userfile:
+        # Get a list of user-specified LBC creation files (either 
+        # archived or on disk)
+        srcfilebase = insert_date(args.userfile, args.cycletime)
+
+        if "moose:" in srcfilebase:
+            if "tar.gz" in srcfilebase:
+                print("Zipped tar file, contents needs to be unzipped and extracted")
+                test = subprocess.Popen(["moo", "test", srcfilebase], stdout=subprocess.PIPE)
+                if test.stdout.read().decode('utf-8').strip() == 'true':
+                    filelist = get_mass_file_and_unpack(srcfilebase, args.datadir)
+                    filelist = [os.path.join(args.datadir, name) for name in filelist]
+                    srcfiles = filelist
+                    args.userfile = srcfiles
+                    print("[INFO] Copied file from MASS ", srcfilebase, " to ", args.datadir)
+                else:
+                    print("File ", srcfilebase, "not found. Exiting...")
+                    sys.exit(1)
+            else:
+                srcfiles = list_archived_files(srcfilebase)
+        else:         
+            srcfiles = glob.glob(srcfilebase)
+    else:
+        if not args.model == 'barra':
+            # Get a list of LBC creation files produced by the chosen
+            # operational model that are currently on disk
+            if args.ukv_lbcs == 'glm_lbc':
+                # The Global model runs 6 hourly at 00,06,12,18 UTC
+                # whereas the UKV analysis is available every hour.
+                # If the offset to the latest GM cycle is shorter than 3 hours, 
+                # the global model has probably not completed its run, 
+                # hence the LAM uses the previous GM cycle for LBC creation
+                HH = args.cycletime.strftime("%H")
+                hr_offset_glm = int(HH) % 6
+                if hr_offset_glm < 3: hr_offset_glm = hr_offset_glm+6
+                cycletime = args.cycletime - timedelta(hours = hr_offset_glm)
+                srcfiles = get_oper_filenames(cycletime, args.model)
+            elif args.ukv_lbcs == 'ukv_lbc':
+                srcfiles = get_oper_filenames(args.cycletime, args.model, ukv_lbc=True)
+            else:
+                srcfiles = get_oper_filenames(args.cycletime, args.model)
+            srcfiles = glob.glob(srcfiles)
+        else:
+            srcfiles = list_archived_files_nci_barra(args.cycletime, 
+                                    args.start_hour, 
+                                    args.end_hour)
+
+    if not srcfiles:
+        print("No source files found. Exiting...")
+        sys.exit(1)
+
+    #Retrieve NCI BARRA files from archive
+    if (args.userfile is None) and (args.model == 'barra'):
+        destfiles = []
+        for hour_code in range(args.start_hour, args.end_hour+1):
+            destfile = destdir + "/" + args.model + ("_cb%03d" % hour_code)
+            destfiles.append(destfile)
+
+        retrieve_archived_files_nci_barra(srcfiles, destfiles)
+        sys.exit(0)
+
+    # Decode the timestamp of the LBC creation files into number of hours
+    # relative to the basis time and sort in ascending time order
+    hours, srcfiles = sort_files(srcfiles)
+
+    # Work out which LBC creation files contain data necessary for the 
+    # generation of LBCs for this CRUN (i.e. fields between start_hour
+    # and end_hour)
+    if args.ukv_lbcs == 'glm_lbc':
+        start_hour = args.start_hour + hr_offset_glm
+        end_hour = args.end_hour + hr_offset_glm + 1
+        start = next(i for i in hours if i >= start_hour)
+        end = next(i for i in hours if i >= end_hour)
+    else:     
+        start = next(i for i in hours if i >= args.start_hour)
+        end = next(i for i in hours if i >= args.end_hour)
+    indstart = hours.index(start)
+    indend = hours.index(end)
+    srcfiles = srcfiles[indstart:indend + 1]
+
+    # These will be the names of the files once retrieved from the 
+    # archive or linked to
+    destfiles = []
+    for srcfile in srcfiles:
+        hour_code = srcfile[-3:]
+        destfile = destdir + "/" + args.model + "_cb" + hour_code
+        destfiles.append(destfile)
+
+    # Retrieve or link to the required LBC creation files. These can then
+    # be passed into CreateBC to make LBCs for nested LAMs for this CRUN
+    if args.userfile and "moose:" in args.userfile:
+        tempdir = destdir + "/temp"
+        if not os.path.isdir(tempdir):
+            os.makedirs(tempdir) 
+        retrieve_archived_files(srcfiles, tempdir)
+        for srcfile, destfile in zip(srcfiles, destfiles):
+            os.rename(tempdir + "/" + os.path.basename(srcfile), destfile)
+    else:
+        for srcfile, destfile in zip(srcfiles, destfiles):
+            link_to_file(srcfile, destfile)
+
+ 
+if __name__=='__main__':
+    main(sys.argv[1:])

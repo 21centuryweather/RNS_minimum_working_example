@@ -1,0 +1,114 @@
+#!/usr/bin/env python
+
+import os
+import re
+import sys
+import glob
+import argparse
+import subprocess 
+
+def decode_hour(hour_code):
+    """Determines the total number of hours since the forecast basis time.
+
+       Arguments:
+         hour_code -- a 3-character (either a letter followed by 2 integers
+                      or 3 integers) relative total timestamp (see UMDP 007)     
+       Returns:
+         The total number of hours relative to the start of the forecast
+    """
+    pattern = re.compile('^[a-z0-9]\d{2}$')
+    matches = pattern.findall(hour_code)
+    if len(matches) != 1:
+        print("Error: Hour code must consist of either 3 integers or a letter followed by 2 integers. Exiting...")
+        exit(1)  
+    # ord(c) - 87 for c = a, b,..., z maps a to 10, b to 11,..., z to 35
+    hour = int("".join([str(ord(c) - 87) if c.isalpha() else c for c in hour_code]))
+    return hour
+
+def sort_files(files):
+    """Sorts a list of files by time relative to the forecast basis time."""
+    # First strip off any file extensions
+    files_noext = []
+    for f in files:
+        while True:
+            f, ext = os.path.splitext(f)
+            if not ext:
+                files_noext.append(f)
+                break               
+ 
+    # Search for a 3-character (either 3 integers or a letter followed by 2 integers)
+    # relative timestamp at the end of each filename (without extension)
+    pattern = re.compile('[^0-9][a-z0-9]\d{2}$')
+    hour_codes = []
+    for f in files_noext:
+        fb = os.path.basename(f)
+        matches = pattern.findall(fb)
+        if len(matches) != 1:
+            print("Error: Cannot determine a unique relative timestamp from filename {0}. Exiting...".format(f))
+            exit(1)
+        # Extract last 3 characters of the filename; this is the desired timestamp
+        hour_codes.append(matches[0][1:])
+    
+    # Decode each timestamp and sort the input files by time relative to the 
+    # forecast basis time (ascending order)
+    hours, sorted_hours, sorted_files = [], [], []
+    for hour_code in hour_codes:
+        hours.append(decode_hour(hour_code))
+    if hours:
+        sorted_hours, sorted_files = zip(*sorted(zip(hours, files)))
+        sorted_hours = list(sorted_hours)
+        sorted_files = list(sorted_files)
+    return sorted_hours, sorted_files
+
+def get_first_last_file(files):
+    """Returns the first and last files in a list of files sorted
+       by ascending time relative to the forecast basis time."""    
+    sorted_hours, sorted_files = sort_files(files)
+    return sorted_files[0], sorted_files[-1]
+
+def parse_args():
+    """Parses and returns command line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('datadir_prev', help="Data directory for previous cycle")
+    parser.add_argument('datadir', help="Data directory for current cycle")
+    args = parser.parse_args()   
+    return args
+
+def main(inarg):
+    """Links the first LBC creation file of the first CRUN of the current cycle 
+       to the last LBC creation file of the last CRUN of the previous cycle. 
+       This is only necessary for the driving model when the nested LAMs are 
+       free-running, preventing a discontinuity in LBCs as the driving model
+       is re-initialised at the end of a cycle.
+
+       Command line arguments:
+         datadir_prev -- Model output directory for the previous cycle
+         datadir      -- Model output directory for the current cycle
+    """
+    # Parse input arguments
+    args = parse_args()
+
+    # Find the last LBC creation file from the previous cycle
+    cbfilebase = "*_cb*"
+    cbfiles = glob.glob(args.datadir_prev + "/" + cbfilebase)
+    if not cbfiles:
+        print("Error: No LBC creation files found in {:s}. Exiting...".format(args.datadir_prev))
+        exit(1)
+    first_file_prev, last_file_prev = get_first_last_file(cbfiles)
+
+    # Find the first LBC creation file of the current cycle
+    cbfiles = glob.glob(args.datadir + "/" + cbfilebase)
+    if not cbfiles:
+        print("Error: No LBC creation files found in {:s}. Exiting...".format(args.datadir))
+        exit(1)
+    first_file, last_file = get_first_last_file(cbfiles)
+
+    # Now link the first LBC creation file of the current cycle to the 
+    # last LBC creation file of the previous cycle
+    os.remove(first_file)
+    if os.path.islink(last_file_prev):
+        last_file_prev = os.readlink(last_file_prev)
+    os.symlink(last_file_prev, first_file)
+  
+if __name__=='__main__':
+    main(sys.argv[1:])

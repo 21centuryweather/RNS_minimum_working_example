@@ -1,0 +1,66 @@
+#!/bin/bash
+#
+# Run this script either in this bin directory or the suite directory immediately above.
+#
+# Script to run through all optional Met Office test configs.
+# And move each suite.rc.processed to suite.rc.processed.<optional_config>
+# Clunky, but works. Ways it could be improved.
+# 1. GUI doesn't fire up because of unsetting DISPLAY.
+# 2. Better solution would be to use --no-gcontrol, but that doesn't seem to be recognised.
+# 3. Is there a way of generating the suite.rc.processed without running the suite?
+#
+
+#
+# Unset display
+#
+DISPLAY=
+
+#
+# Move up into top level directory. 
+#
+
+#
+# Work out current directory name
+#
+s_end=`echo $(pwd) | cut -d '-' -f 2`
+s_start=`echo ${s_end} | cut -d '/' -f 1`
+suite="u-${s_start}"
+
+cd ~/roses/$suite
+#
+# Now loop through all optional configurations.
+#
+configs="mo1b-xukv_oper mo1b mo1c-xukv_rerun mo1c mo1c_ants_2nests mo1c_ukca "
+#configs="$configs mo1c_ukca_freerun mo_ec_double mo_ec_free_double "
+#configs="$configs mo_glm_free_double mo_glm_sin_3confto36 mo_progdust_nestx2"
+
+for con in $configs ; do  
+
+  echo " " 
+  echo "RUNNING  $con  CONFIGURATION"
+  echo " " 
+
+  rose suite-run -O $con -- --mode=simulation --hold && rose suite-stop -y
+  fin="no"
+
+  #
+  # wait until suite has stopped before moving on to next configuration
+  #
+  sleep 1
+  while [ "$fin" = "no" ] ; do 
+    ps -fu $USER | grep rose.suite_run
+    if [ "${10}" != "rose.suite-run"  ] ; then
+      mv ~/cylc-run/$suite/suite.rc.processed ~/cylc-run/$suite/suite.rc.processed.$con
+      fin="yes"
+    else
+      echo "Waiting another 2 seconds for $con test suite to stop"
+      sleep 2
+    fi
+  done
+
+done
+
+#
+# Reset display
+#
+DISPLAY=:0

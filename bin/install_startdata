@@ -1,0 +1,274 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import pytz
+import argparse
+import subprocess 
+from datetime import datetime, timedelta
+import numpy as np
+
+def make_date(datestring):
+    """Returns a Python datetime object derived from a string 
+       describing a cycletime in ISO8601 format.
+    """
+    return datetime.strptime(datestring, '%Y%m%dT%H%MZ').replace(tzinfo=pytz.UTC)
+
+def insert_date(filename, cycletime):
+    """Inserts a cycletime into a filename. 
+
+       Arguments:
+         filename  -- the name of a file that contains some or all
+                      of the strings YYYY, mm, dd, HH and MM (representing 
+                      the year, month, day, hour and minute, respectively)
+                      that are to be replaced with the cycletime
+         cycletime -- the cycletime of interest in ISO8601 format
+       Returns:
+         The modified filename 
+    """
+    filename = filename.replace("YYYY", cycletime.strftime("%Y"))
+    filename = filename.replace("YY", cycletime.strftime("%Y")[0:2])
+    filename = filename.replace("mm", cycletime.strftime("%m"))
+    filename = filename.replace("dd", cycletime.strftime("%d"))
+    filename = filename.replace("HH", cycletime.strftime("%H"))
+    filename = filename.replace("MM", cycletime.strftime("%M"))
+    return filename
+
+def parse_args():
+    """Parses and returns command line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('datadir', help="Data directory")
+    parser.add_argument('cycletime', help="Desired cycletime in the format YYYYmmddTHHMMZ", type=make_date)
+    parser.add_argument('model', help="Driving model name")
+    parser.add_argument("--rerun", help="True if the driving model is being re-run", action="store_true")
+    parser.add_argument("--recon", help="True if reconfiguration is to be done", action="store_true")
+    parser.add_argument('userfile', nargs='?', default=argparse.SUPPRESS)
+    parser.add_argument('--userfile', help="User-supplied analysis file", dest='userfile', default=None)
+    parser.add_argument('--nci_ukic', help="True if model is run from UKIC Tape", action="store_true")
+    args = parser.parse_args()
+    if args.recon and not args.rerun:
+        print("Error: --recon cannot be set if --rerun is not set")
+        sys.exit(1)   
+    return args
+
+def get_oper_filenames(cycletime, model, nci_ukic=False, rerun=True):
+    """Get the name of the operational analysis for the driving model
+       on the supplied date.
+
+       Arguments:
+         cycletime -- the cycletime of interest in ISO8601 format
+         model     -- operational model name
+       Keyword arguments:
+         rerun    -- set to true if the driving model is being re-run, in
+                     which case an operational analysis will be retrieved
+                     from the archive
+       Returns:
+         The name of the operational analysis file for the driving model 
+         on the chosen date.
+    """
+
+    # Date when the naming convention of operational files changed with
+    # the introduction of Rose
+    rose_switch_date = datetime(2014, 2, 4, 12).replace(tzinfo=pytz.UTC)
+
+    # Date when the naming convention of operational files changed with
+    # the introduction of the ISO8601 date-time format
+    iso_switch_date = datetime(2015, 8, 25, 12).replace(tzinfo=pytz.UTC)
+
+    if model == "glm" and (not nci_ukic):
+        # Global driving model
+        if rerun:
+            # Location of operational global analyses in the MASS archive
+            oparchdir = "moose:/opfc/atm/global/rerun/{:%Y%m}.file/".format(cycletime)
+            if cycletime < rose_switch_date:
+                opanalysis = oparchdir + "{:%Y%m%d}_qwqg{:%H}.T+0".format(cycletime, cycletime)
+            elif cycletime < iso_switch_date:
+                opanalysis = oparchdir + "{:%Y%m%d%H}_glm_t+0".format(cycletime)
+            else:
+                opanalysis = oparchdir + "{:%Y%m%dT%H%MZ}_glm_t+0".format(cycletime)
+        else:
+            # Location of operational global analyses on disk
+            opdir = "/critical/opfc/suites-oper/global/share/data/{:%Y%m%dT%H%MZ}/".format(cycletime)
+            opanalysis = opdir + "glm_atmanl"
+    elif model =="drv_ukv":
+            # Location of operational global analyses on disk
+            opdir = "/critical/opfc/suites-oper/uk/share/data/{:%Y%m%dT%H%MZ}/".format(cycletime)
+            opanalysis = opdir + "ukv_atmanl"
+    elif model == "barra" or nci_ukic:
+            if model == "barra":
+                # Location of BARRA analyses in the NCI MDSS archive
+                mdss_file = os.path.join('reana/prod/BARRA_R/v1/r*/misc/%04d/%02d/%s/ra_atmanl' % (cycletime.year, cycletime.month, cycletime.strftime('%Y%m%dT%H%MZ')))
+                project = 'du7'
+            else:
+                # Location of UKIC 3Z IC in the NCI MDSS archive
+                mdss_file = os.path.join('UKDAILY/UKIC_%04d_%02d/qwqg00.reduced.%s00.T+%d.gz' % (cycletime.year, cycletime.month, cycletime.strftime('%Y%m%d'), cycletime.hour))
+                project = 'ig2'
+
+            cmd = ["mdss", "-P", project, "ls", mdss_file]
+            try:
+                files = subprocess.check_output(cmd).strip().split("\n")
+                if not files:
+                    print("No files matching pattern {:s} in archive".format(mdss_file))
+                    sys.exit(1)
+                else:
+                    files.sort()
+                    opanalysis = files[-1]
+            except subprocess.CalledProcessError as ex:
+                print("Error listing files {:s}, MDSS ls error code = {:d}".format(mdss_file, ex.returncode))
+                sys.exit(1)
+    else:
+        # Support for other driving models will be added at a later date
+        print("No valid operational model name supplied. Exiting...")
+        sys.exit(1)
+    return opanalysis
+
+def retrieve_archived_files(src, dest):
+    """Retrieves files from the MASS archive."""
+    if type(src) is not list:
+        src = [src]
+    src = " ".join(src)
+    cmd = ["moo get -f " + src + " " + dest]
+    try:
+        subprocess.check_call(cmd, shell=True)
+    except subprocess.CalledProcessError as ex:
+        print("Error retrieving file(s) {:s}, MOOSE error code = {:d}".format(src, ex.returncode))
+        sys.exit(1)  
+
+def retrieve_archived_files_nci(src, dest, model):
+    """Retrieves BARRA 6-hourly or UKIC 3Z files from the NCI tape archive."""
+    if model == 'barra':
+        project = 'du7'
+    else:
+        project = 'ig2'
+
+    # first check staging status
+    cmd = ["mdss", "-P", project, "dmls", "-l", src]
+    try:
+        files = subprocess.check_output(cmd).strip().split("\n")
+    except subprocess.CalledProcessError as ex:
+        print("Error querying file(s) {:s}, MDSS dmls error code = {:d}".format(src, ex.returncode))
+        sys.exit(1)
+
+    check = np.array([not 'DUL' in file for file in files])
+    stage_file = 'atmanl_stage.in_process'
+    if check.sum() > 0:
+        if os.path.exists(stage_file):
+            print("Still staging {:} files, failed to allow rerun of task at later time".format(check.sum()))
+            sys.exit(2)
+        else:
+            print("Start staging, failed to allow rerun of task at later time")
+            cmd = ["mdss", "-P", project, "stage", src]
+            subprocess.check_call(cmd)
+            open(stage_file, 'a').close()
+            #Path(stage_file).touch()
+            sys.exit(2)
+
+    # completed staging
+    if os.path.exists(stage_file):
+        os.remove(stage_file)
+
+    # retrieve the file
+    if model == 'barra':
+        retr_target = dest
+    else:
+        retr_target = os.path.join( os.path.dirname(dest), 'src')
+        if not os.path.exists(retr_target):
+            os.makedirs(retr_target)
+
+    cmd = ["mdss", "-P", project, 'get', src, retr_target]
+    try:
+        subprocess.check_call(cmd)
+        print("Retrieved {:s}".format(src))
+    except subprocess.CalledProcessError as ex:
+        print("Error retrieving file(s) {:s}, MDSS get error code = {:d}".format(src, ex.returncode))
+        sys.exit(1)
+
+    if model == 'barra':
+        print("Retrieved {:s} -> {:s}".format(src, retr_target))
+        return
+    else:
+        # need to unzip
+        retr_file = os.path.join(retr_target, os.path.basename(src))
+        print("Unzipping {:s}".format(retr_file))
+        cmd = ['gunzip', '-f', retr_file]
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as ex:
+            print("Error gunziping file(s) {:s}, gunzip error code = {:d}".format(retr_file, ex.returncode))
+            sys.exit(1)
+
+        link_to_file(retr_file.replace(".gz", ""), dest)
+        return
+
+def link_to_file(src, dest):
+    """Creates a soft link to a file on disk."""
+    if not (os.path.isdir(src) or os.path.isfile(src)):
+        print("Source {:s} does not exist".format(src))
+        sys.exit(1)
+    elif os.path.islink(dest):
+        print("Link {:s} already exists".format(dest))
+    elif os.path.dirname(dest) == os.path.dirname(src):
+        print("Source {:s} already in directory".format(src))
+    else: 
+        print("Link {:s} -> {:s}".format(dest, src))
+        os.symlink(src, dest)
+
+def main():
+    """Retrieves or links to an analysis or start dump for the driving model.
+       The file can either be on disk or archived. The default is to use
+       operational files but user-supplied custom files can also be used.
+
+       Command line arguments:
+         datadir   -- data directory for the cycletime of interest (typically 
+                      $ROSE_DATAC)
+         cycletime -- cycletime in the ISO8601 format YYYYmmddTHHMMZ 
+         model     -- driving model name
+       Command line keyword arguments:
+         rerun    -- set to true if the driving model is being re-run as part of 
+                     the nesting suite (as opposed to using files on disk or in
+                     the archive)
+         recon    -- set to true if reconfiguring an analysis to produce a start
+                     dump for the driving model
+         userfile -- full path to a custom analysis file to use, either on disk or 
+                     in the archive
+         nci_ukic -- Load operational analysis from NCI's UKIC tape
+
+    """
+    # Parse command line arguments
+    args = parse_args()
+   
+    # This is where the retrieved initial data will be placed
+    destdir = args.datadir + "/" + args.model + "/ics"
+    if not os.path.isdir(destdir):
+        os.makedirs(destdir)
+
+    if args.rerun and args.recon:
+        # This is the name of the retrieved analysis that will
+        # be reconfigured to produce a start dump for the 
+        # driving model
+        destfile = destdir + "/" + args.model + "_atmanl"
+    else:
+        # This is the driving model start dump
+        destfile = destdir + "/" + args.model + "_astart"
+
+    if args.userfile:
+        # Retrieve or link to a custom analysis 
+        srcfile = insert_date(args.userfile, args.cycletime)
+        if "moose:" in args.userfile:
+            retrieve_archived_files(srcfile, destfile)
+        else:
+            link_to_file(srcfile, destfile)
+    else:
+        # Retrieve or link to an operational analysis 
+        srcfile = get_oper_filenames(args.cycletime,args.model, nci_ukic=args.nci_ukic, rerun=args.rerun)
+        if args.model == "barra" or args.nci_ukic:
+            retrieve_archived_files_nci(srcfile, destfile, args.model)
+            return
+        
+        if args.rerun:
+            retrieve_archived_files(srcfile, destfile)
+        else:
+            link_to_file(srcfile, destfile)
+   
+if __name__=='__main__':
+    main()

@@ -1,0 +1,73 @@
+#!/usr/bin/env python
+
+import pytz
+import argparse
+import datetime
+
+def cycletime_to_datetime(cycletime):
+    '''
+    Converts a cycletime string in ISO8601 format to a \
+    :class:`datetime.datetime` object.
+    '''
+    return (datetime.datetime.strptime(cycletime, "%Y%m%dT%H%MZ")
+            .replace(tzinfo=pytz.UTC))
+
+def parse_args():
+    '''Parses and returns command line arguments.'''
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description=("Find date before the supplied date in a given "
+                     "list of dates"))
+
+    # Required arguments  
+    parser.add_argument("--curr_date",                       
+                        type=cycletime_to_datetime,
+                        help=("Current date in ISO8601 "
+                              "format YYYYmmddTHHMMZ"),
+                        dest="curr_date")
+
+    parser.add_argument("--dates", 
+                        nargs="+", 
+                        type=cycletime_to_datetime,
+                        help=("List of dates to check in ISO8601 "
+                              "format YYYYmmddTHHMMZ"),
+                        dest="dates")
+  
+    # Parse the arguments
+    args = parser.parse_args()
+
+    # Checking of input arguments
+    if not args.curr_date:
+        raise argparse.ArgumentTypeError("Must supply the current date")
+    if not args.dates:
+        raise argparse.ArgumentTypeError("Must supply a list of dates to "
+                                         "check")
+
+    return args
+
+def main(): 
+    # Parse command line arguments 
+    args = parse_args()
+    
+    # Find any dates earlier than curr_date
+    prev_dates = [date for date in args.dates if date < args.curr_date]
+    if prev_dates:
+        # If there are dates before curr_date, select the one just before
+        # curr_date. This is the previous cycle time.
+        prev_date = max(prev_dates)
+        # Work out the cycle offset (in hours) from curr_date to prev_date
+        date_diff = args.curr_date - prev_date
+        date_diff_in_hours = (24 * date_diff.days 
+                              + date_diff.seconds / float(60 * 60))
+        cycle_offset = "-PT{0:d}H".format(int(date_diff_in_hours))
+    else:
+        # If curr_date is earlier than any date in dates, then there is
+        # no previous cycle, in which case the cycle offset is arbitrary.
+        # Set it to 6 hours.
+        cycle_offset = "-PT6H"
+
+    # Print cycle offset to command line
+    print(cycle_offset)
+
+if __name__=='__main__':
+    main()

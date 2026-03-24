@@ -1,0 +1,109 @@
+#!/usr/bin/env python
+
+import argparse
+
+def parse_args():
+    '''Parses and returns command line arguments.'''
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Read horizontal grid namelist file")
+
+    # Required arguments    
+    parser.add_argument("stretch_grid_file", 
+                        help="Name of horizontal grid namelist file")
+
+    # Parse the arguments
+    args = parser.parse_args()
+
+    return args
+
+def get_stretch_grid_parameters(grid_file):
+    # Initialise
+    stretch_grid_params = {"domain_centre_x": None,
+                   "domain_centre_y": None,
+		   "pole_x": None,
+		   "pole_y": None,
+                   "cells_x": None,
+                   "cells_y": None,
+                   "del_x_inner": None,
+                   "del_y_inner": None,
+                   "del_x_outer": None,
+                   "del_y_outer": None,
+		   "npts_x_outer": None,
+		   "npts_y_outer": None,
+                   "npts_x_stretch": None,
+                   "npts_y_stretch": None}
+
+    try:
+        with open(grid_file) as ifp:
+            lines = ifp.readlines()
+            lines = ",".join([line for line in lines])
+            lines = lines.replace(",\n", "") 
+            lines = lines.replace(",/\n", "") 
+            lines = lines.replace("\n", "") 
+            lines = lines.split(",")
+#	    print(lines)
+            for line in lines:
+                if "domain_centre_x" in line :
+                    stretch_grid_params["domain_centre_x"] = float(line.split("=")[1])
+                if "domain_centre_y" in line :
+                    stretch_grid_params["domain_centre_y"] = float(line.split("=")[1])
+                if "pole_x" in line :
+                    stretch_grid_params["pole_x"] = float(line.split("=")[1])
+                if "pole_y" in line :
+                    stretch_grid_params["pole_y"] = float(line.split("=")[1])
+                if "cells_x" in line :
+                    stretch_grid_params["cells_x"] = int(line.split("=")[1])
+                if "cells_y" in line :
+                    stretch_grid_params["cells_y"] = int(line.split("=")[1])
+                if "del_x_inner" in line :
+                    stretch_grid_params["del_x_inner"] = float(line.split("=")[1])
+                if "del_y_inner" in line :
+                    stretch_grid_params["del_y_inner"] = float(line.split("=")[1])
+                if "del_x_outer" in line :
+                    stretch_grid_params["del_x_outer"] = float(line.split("=")[1])
+                if "del_y_outer" in line :
+                    stretch_grid_params["del_y_outer"] = float(line.split("=")[1])
+                if "npts_x_outer" in line :
+                    stretch_grid_params["npts_x_outer"] = int(line.split("=")[1])
+                if "npts_y_outer" in line :
+                    stretch_grid_params["npts_y_outer"] = int(line.split("=")[1])
+                if "npts_x_stretch" in line :
+                    stretch_grid_params["npts_x_stretch"] = int(line.split("=")[1])
+                if "npts_y_stretch" in line :
+                    stretch_grid_params["npts_y_stretch"] = int(line.split("=")[1])
+
+    except IOError:
+        raise IOError("Problem reading file {0:s}".format(stretch_grid_file))
+
+    return stretch_grid_params
+
+def main(): 
+    # Parse command line arguments 
+    args = parse_args()
+      
+    # Read the grid parameters from the stretch grid namelist file
+    stretch_grid_params = get_stretch_grid_parameters(args.stretch_grid_file)
+    if any([param is None for param in stretch_grid_params.values()]):
+        raise ValueError("Could not read all required grid parameters " 
+                         "from namelist file {0:s}".format(args.stretch_grid_file))
+
+    # Print variable resolution grid parameters to command line
+    print ("{0:.10f},{1:.10f},{2:.10f},{3:.10f},{4:d},{5:d},{6:.10f},{7:.10f},{8:.10f},{9:.10f},{10:d},{11:d},{12:d},{13:d}".format(stretch_grid_params["domain_centre_x"],
+                                                stretch_grid_params["domain_centre_y"],
+                                                stretch_grid_params["pole_x"],
+                                                stretch_grid_params["pole_y"],
+                                                stretch_grid_params["cells_x"],
+                                                stretch_grid_params["cells_y"],
+                                                stretch_grid_params["del_x_inner"],
+                                                stretch_grid_params["del_y_inner"],
+                                                stretch_grid_params["del_x_outer"],
+                                                stretch_grid_params["del_y_outer"],
+                                                stretch_grid_params["npts_x_outer"],
+						stretch_grid_params["npts_y_outer"],
+						stretch_grid_params["npts_x_stretch"],
+						stretch_grid_params["npts_y_stretch"],
+						))
+                                          
+if __name__=='__main__':
+    main()

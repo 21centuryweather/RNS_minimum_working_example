@@ -1,0 +1,52 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# (C) Crown copyright Met Office. All rights reserved.
+#-------------------------------------------------------------------------------
+set -eu
+set -x
+
+datapath=$1
+
+trim=mule-trim
+convpp=mule-convpp
+
+echo "Model defination is " ${VARGRID}
+echo "[INFO] $convpp $datapath "
+echo "[INFO] Removing .pp and .cutout files from previous attempts"
+rm -f $datapath/*.pp
+rm -f $datapath/*.cutout
+
+i=0
+
+for filename in $datapath/*a_p*; do
+    last3=`echo $filename | rev | cut -c1-3 | rev`
+
+    if [[ $last3 == '.pp' ]]; then
+	   echo "[INFO] skipping $filename"
+    else
+
+       if [[ ${VARGRID} = "variable" ]] ; then
+           echo "[INFO] Doing cutout for $filename"
+           $trim $filename $filename.tmp.cutout 2 2 1>> $CYLC_TASK_WORK_DIR/umpp_cutout.$i.out
+	       if [[ $? -eq 0 ]]; then
+	         mv $filename.tmp.cutout $filename.cutout
+	       fi
+
+           echo "[INFO] Doing convpp for $filename.cutout"
+           $convpp $filename.cutout $filename.cutout.tmp.pp 1>> $CYLC_TASK_WORK_DIR/umpp_cutoutpp.$i.out
+
+           if [[ $? -eq 0 ]]; then
+	         mv $filename.cutout.tmp.pp $filename.cutout.pp
+	   fi
+        fi
+
+        echo "[INFO] Doing convpp for $filename"
+        $convpp $filename $filename.tmp.pp 1>> $CYLC_TASK_WORK_DIR/umpp.$i.out
+	    if [[ $? -eq 0 ]]; then
+	      mv $filename.tmp.pp $filename.pp
+	    fi
+        i=$((i+1))
+    fi
+done
+
+

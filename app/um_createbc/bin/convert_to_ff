@@ -1,0 +1,9 @@
+#!/bin/bash
+
+lbc_to_ff_script=${LFRIC_ROOT}/fcm_make_lfric/extract/lfric_apps/applications/lfricinputs/scripts/lbc2ff/lbc2ff.py
+lbc_file=$ROSE_DATAC/${DATADIR}/lbcs/${DOMAIN_ID}_alabc_lfric_${CRP}
+
+	
+#Convert LBC file to FF fieldsfile format
+${lbc_to_ff_script} ${lbc_file}
+

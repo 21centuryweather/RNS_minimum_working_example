@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+
+import os
+import argparse
+
+#exec_dir="spack_build"
+
+
+def parse_args():
+    """Parses and returns command line arguments."""
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('exec_dir', help="Data directory")
+
+    args = parser.parse_args()
+    if not args.exec_dir:
+        print("Error: --exec_dir is not set")
+        sys.exit(1)
+    return args
+
+
+def main():
+    """Links to the SPACK executable directory using the SPACK_UM_ROOT environment variable
+       if the vk83 modules.
+
+       Command line arguments:
+         execdir   -- directory for the suite spack executable 
+
+    """
+
+   # Parse command line arguments
+    args = parse_args()
+
+    # Command-line address of the suite spack directory
+    exec_dir=args.exec_dir.replace('exec_dir=','')
+
+    print(exec_dir)
+
+    # The full path to the target spack directory
+    spack_dir=os.environ['SPACK_UM_ROOT']
+   
+    # Check to see if the suite spack directory exists
+    if os.path.exists(exec_dir):
+
+        # Make sure it is a symbolic link
+        if os.path.islink(exec_dir):
+
+            # Get the full path to the linked file
+            real_fname=os.path.realpath(exec_dir)
+
+            # If the currently linked file does not match the target link file
+            # Remove the link
+            if real_fname != spack_dir:
+                print(f"unlink {exec_dir}")
+                os.unlink(exec_dir)
+            else:
+                print(f"retain {spack_dir}")
+        else:
+            print(f"{exec_dir} is not a symbolic link")
+            raise
+    
+    # If the correct link does not exist then make it. 
+    if not os.path.islink(exec_dir):
+        print(f'Linking {spack_dir} {exec_dir}')
+        os.symlink(spack_dir,exec_dir)
+
+if __name__=='__main__':
+    main()
+
