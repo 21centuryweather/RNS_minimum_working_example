@@ -256,6 +256,9 @@
     {# UM task family #}
     [[CREATEBC]]
         inherit = None, HOST_HPC
+
+    [[LBCS]]
+
     [[UM_LAM]]
         # Settings for all LAM recon and forecast tasks.
         inherit = HOST_HPC
@@ -271,7 +274,14 @@
     [[Region_Resolution_Model]]
     
         [[Region_Resolution_Model_CREATEBC]]
+            {% set NLBC_TIMES = ((CRUN_LEN * 60 * 60) / rg01_rs01_m01_lbc_freq[0])|int + 1 %}
             inherit = CREATEBC
+            pre-script = mkdir -p $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/lbcs/
+            [[[environment]]]
+                NUM_HEADERS = {{16 * NLBC_TIMES * ((rg01_rs01_levset|vert_levs)["nlevs"] + 1) + 1}}	
+                STASH_CODES = 33,2,3,150,253,4,10,254,12,255
+                VERT_LEV = {{rg01_rs01_ancil_dir}}/vertlevs.nl
+                ROSE_APP_OPT_CONF_KEYS = custom
 
         [[Region_Resolution_Model_LBCS]]
             inherit = Region_Resolution_Model, Region_Resolution_Model_CREATEBC
@@ -333,6 +343,35 @@
 
             [[Region_Resolution_Model_um_recon]]
                 inherit = Region_Resolution_Model_um, UM_LAM_RECON
+
+                script = """
+                    {% if rg01_rs01_m01_config == "GAL9" %}
+                        INIT_TIME={{INITIAL_CYCLE_POINT}}
+                        DATE=$(rose date -c -f "%Y%m%dT%H00Z")
+                        FREE_RUN={{FREE_RUN}}
+                        DRIVING_MODEL={{dm_name}}
+                        UM_OPT="$ROSE_SUITE_DIR/app/um/opt"
+                        if [[ "$DRIVING_MODEL" != "ec" ]]; then
+                            cp ${UM_OPT}/rose-app-GAL9_standard.conf ${UM_OPT}/rose-app-GAL9.conf
+                        elif [[ "$FREE_RUN" == "False" || "$DATE" == "$INIT_TIME" ]]; then 
+                            cp ${UM_OPT}/rose-app-GAL9_EC_spinup.conf ${UM_OPT}/rose-app-GAL9.conf
+                        else
+                            cp ${UM_OPT}/rose-app-GAL9_standard.conf ${UM_OPT}/rose-app-GAL9.conf
+                        fi
+                    {% endif %}
+                    {{TASK_RUN_COMMAND}} --path="share/spack_build/*/bin" ${TASK_RUN_EXTRA_OPTS:-} --command-key=recon
+                    """
+            [[[environment]]]
+                DEL_Y = $DEL_Y
+                DEL_X = $DEL_X
+                FIRST_LAT = $FIRST_LAT
+                FIRST_LON = $FIRST_LON
+                NPTS_Y = $NPTS_Y
+                NPTS_X = $NPTS_X
+                POLE_LAT = $POLE_LAT
+                POLE_LON = $POLE_LON
+                DATADIR = $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/ics
+                RUN_END = 0,0,0,0,0,0
 
             [[Region_Resolution_Model_um_recon_cyclen]]
                 inherit = Region_Resolution_Model_um, UM_LAM_RECON
