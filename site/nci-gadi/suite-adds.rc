@@ -309,7 +309,7 @@
     init-script = """
         {{UM_ENV()}}
     """
-    {{atmos_resources(rg01_rs01_m01_nproc[0],rg01_rs01_m01_nproc[1],UM_ATM_OMP,UM_ATM_MEM)}}
+    {{atmos_resources(rg01_rs01_m01_nproc[1],rg01_rs01_m01_nproc[0],UM_ATM_OMP,UM_ATM_MEM)}}
 
     [[Region_Resolution_Model_um_recon]]
         init-script = """

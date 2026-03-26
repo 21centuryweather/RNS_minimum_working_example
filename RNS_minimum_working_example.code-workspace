@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../cylc-run/rCM3-test-UM-fcst"
+		},
+		{
+			"path": "../../code/cylc-flow"
+		},
+		{
+			"path": "../u-by395"
+		},
+		{
+			"path": "../../cylc-run/RNS_minimum_working_example"
+		}
+	],
+	"settings": {}
+}
