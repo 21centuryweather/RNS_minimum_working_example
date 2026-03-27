@@ -63,50 +63,42 @@
             install_cold_hpc
             install_cold_hpc[^] => install_ec_startdata
             install_cold_hpc => nci_hres_eccb
-            {% for lb in range(n_lbcs) %}
-                {% set lbc = lb|pad(3,"0") %}
-                nci_era5grib_parallel => ec_um_recon_{{lbc}}
-                install_ec_startdata => ec_um_recon_{{lbc}} => Region_Resolution_Model_um_createbc_000
-            {% endfor %}
 
             ec_um_recon_000  =>  nci_hres_eccb => Region_Resolution_Model_um_recon => nci_hres_ic => Region_Resolution_Model_um_fcst_000
+            ec_um_recon_000  =>  nci_hres_eccb => Region_Resolution_Model_um_createbc_000
 
-            {% for cr in range(0,n_cruns) %}
+            Region_Resolution_Model_um_recon => Region_Resolution_Model_um_fcst_000 => Region_Resolution_Model_um_fcst_001 => Region_Resolution_Model_um_fcst_002 => Region_Resolution_Model_um_fcst_003 => housekeep_cycle
+
+            install_ec_startdata => ec_um_recon_000 => Region_Resolution_Model_um_createbc_000
+            nci_era5grib_parallel => ec_um_recon_000
+            {% for lb in range(1,n_lbcs) %}
+                {% set lbc = lb|pad(3,"0") %}
+                    install_ec_startdata => ec_um_recon_{{lbc}} => Region_Resolution_Model_um_createbc_000
+                    nci_era5grib_parallel => ec_um_recon_{{lbc}}
+            {% endfor %}
+
+            Region_Resolution_Model_um_createbc_000 => Region_Resolution_Model_um_fcst_000
+
+            {% for cr in range(1,n_cruns) %}
                 {% set crp = cr|pad(3,"0") %}
-                Region_Resolution_Model_um_recon => Region_Resolution_Model_um_fcst_000
-                {% if crp != "000" %}
-                    Region_Resolution_Model_um_createbc_000 => Region_Resolution_Model_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
-                {% endif %}
+                 => Region_Resolution_Model_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
             {% endfor %} 
             
-        Region_Resolution_Model_um_fcst_{{(n_cruns-1)|pad(3,"0")}} => housekeep_cycle
 
             """   
         [[[+PT24H/PT24H]]]
             graph = """
-            install_cold_hpc[^] => install_ec_startdata
-            housekeep_cycle[-PT24H] 
+            housekeep_cycle[-PT24H] => Region_Resolution_Model_um_recon_cyclen => Region_Resolution_Model_um_fcst_000 => Region_Resolution_Model_um_fcst_001 => Region_Resolution_Model_um_fcst_002 => Region_Resolution_Model_um_fcst_003 => housekeep_cycle
+
             {% for lb in range(n_lbcs) %}
                 {% set lbc = lb|pad(3,"0") %}
                 install_ec_startdata => ec_um_recon_{{lbc}} => ec_linkprev
-                nci_era5grib_parallel => ec_um_recon_{{lbc}}
             {% endfor %}
 
-            {% for cr in range(1,n_cruns) %}
+            {% for cr in range(0,n_cruns) %}
                 {% set crp = cr|pad(3,"0") %}
                 ec_linkprev => Region_Resolution_Model_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
             {% endfor %} 
-
-           {% for cr in range(0,n_cruns) %}
-               {% set crp = cr|pad(3,"0") %}
-               Region_Resolution_Model_um_recon_cyclen => Region_Resolution_Model_um_fcst_{{crp}}
-               {% if crp != "000" %}
-                   Region_Resolution_Model_um_createbc_000 => Region_Resolution_Model_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
-               {% endif %}
-           {% endfor %} 
-            
-            Region_Resolution_Model_um_fcst_{{(n_cruns-1)|
-            pad(3,"0")}} => housekeep_cycle
 
             housekeep_cycle[-PT24H] => ec_linkprev
             # Don't run nci_era5grib concurrently
@@ -256,6 +248,9 @@
     {# UM task family #}
     [[CREATEBC]]
         inherit = None, HOST_HPC
+        script = TASK_RUN_COMMAND --path="share/spack_build/*/bin" ${TASK_RUN_EXTRA_OPTS:-}
+        [[[environment]]]
+            ROSE_TASK_APP = um_createbc
 
     [[LBCS]]
     {% set NLBC_TIMES = ((CRUN_LEN * 60 * 60) / rg01_rs01_m01_lbc_freq[0])|int + 1 %}
