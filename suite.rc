@@ -468,11 +468,11 @@
                 script = {{TASK_RUN_COMMAND}} --path="share/spack_build/*/bin" ${TASK_RUN_EXTRA_OPTS:-}
                 post-script = """
                       unlink $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/lbcs/GAL9_alabc
-                      cd $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/ics
+                      cd $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/ics/
                       ls -tr *a_da* | head -n -1 | xargs --no-run-if-empty rm
                       """
                 [[[environment]]]
-                    DATADIR = $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/um
+                    DATADIR = $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/um/
 
                 {% for cr in range(n_cruns) %}
                     {% set crp = cr|pad(3,"0") %}
@@ -484,9 +484,9 @@
                         """
                         [[[environment]]]
                     {% if loop.first %}
-                        CONTINUE = false
+                            CONTINUE = false
                     {% else %}
-                        CONTINUE = true
+                            CONTINUE = true
                     {% endif %}
                             RUN_END = 0,0,0,{{END_HOUR}},0,0
                 {% endfor %}
