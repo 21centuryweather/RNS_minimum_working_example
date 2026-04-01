@@ -77,13 +77,10 @@
                     nci_era5grib_parallel => ec_um_recon_{{lbc}}
             {% endfor %}
 
-            Region_Resolution_Model_um_createbc_000 => Region_Resolution_Model_um_fcst_000
-
-            {% for cr in range(1,n_cruns) %}
+            {% for cr in range(0,n_cruns) %}
                 {% set crp = cr|pad(3,"0") %}
-                 => Region_Resolution_Model_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
-            {% endfor %} 
-            
+                nci_hres_eccb => Region_Resolution_Model_um_createbc_{{crp}} => Region_Resolution_Model_um_fcst_{{crp}}
+            {% endfor %}             
 
             """   
         [[[+PT24H/PT24H]]]
