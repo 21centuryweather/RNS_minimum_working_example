@@ -367,22 +367,22 @@
                 PSLIST=1,2,3,4,5,6,7,8,9
 
             [[Region_Resolution_Model_um_recon]]
-                inherit = Region_Resolution_Model_um, UM_LAM_RECON
+                inherit = Region_Resolution_Model_um, UM_LAM_RECON, {{ dm_name | upper }}_OPER_HOOK_TASKS
 
                 script = """
                     {% if rg01_rs01_m01_config == "GAL9" %}
-                        INIT_TIME={{INITIAL_CYCLE_POINT}}
-                        DATE=$(rose date -c -f "%Y%m%dT%H00Z")
-                        FREE_RUN={{FREE_RUN}}
-                        DRIVING_MODEL={{dm_name}}
-                        UM_OPT="$ROSE_SUITE_DIR/app/um/opt"
-                        if [[ "$DRIVING_MODEL" != "ec" ]]; then
-                            cp ${UM_OPT}/rose-app-GAL9_standard.conf ${UM_OPT}/rose-app-GAL9.conf
-                        elif [[ "$FREE_RUN" == "False" || "$DATE" == "$INIT_TIME" ]]; then 
-                            cp ${UM_OPT}/rose-app-GAL9_EC_spinup.conf ${UM_OPT}/rose-app-GAL9.conf
-                        else
-                            cp ${UM_OPT}/rose-app-GAL9_standard.conf ${UM_OPT}/rose-app-GAL9.conf
-                        fi
+                    INIT_TIME={{INITIAL_CYCLE_POINT}}
+                    DATE=$(rose date -c -f "%Y%m%dT%H00Z")
+                    FREE_RUN={{FREE_RUN}}
+                    DRIVING_MODEL={{dm_name}}
+                    UM_OPT="$ROSE_SUITE_DIR/app/um/opt"
+                    if [[ "$DRIVING_MODEL" != "ec" ]]; then
+                        cp ${UM_OPT}/rose-app-GAL9_standard.conf ${UM_OPT}/rose-app-GAL9.conf
+                    elif [[ "$FREE_RUN" == "False" || "$DATE" == "$INIT_TIME" ]]; then 
+                        cp ${UM_OPT}/rose-app-GAL9_EC_spinup.conf ${UM_OPT}/rose-app-GAL9.conf
+                    else
+                        cp ${UM_OPT}/rose-app-GAL9_standard.conf ${UM_OPT}/rose-app-GAL9.conf
+                    fi
                     {% endif %}
                     {{TASK_RUN_COMMAND}} --path="share/spack_build/*/bin" ${TASK_RUN_EXTRA_OPTS:-} --command-key=recon
                     """
@@ -395,7 +395,7 @@
                 NPTS_X = $NPTS_X
                 POLE_LAT = $POLE_LAT
                 POLE_LON = $POLE_LON
-                DATADIR = $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/ics
+                DATADIR = $ROSE_DATAC/{{rg01_name}}/{{rg01_rs01_name}}/{{rg01_rs01_m01_config}}/ics/
                 RUN_END = 0,0,0,0,0,0
 
             [[Region_Resolution_Model_um_recon_cyclen]]
@@ -529,5 +529,8 @@
             ROSE_APP_OPT_CONF_KEYS={{hs_opt()}}
             ROSE_TASK_APP = housekeep
  
+    [[{{ dm_name | upper }}_OPER_HOOK_TASKS]]
+        # empty family just used to group tasks that if the RUN_MODE is "oper" need to be run on the same machine as the operational suite 
+
 {# Site-specific details that add to (or override) the core suite definition. #}
 {% include 'site/' + SITE + '/suite-adds.rc' %}

@@ -5,6 +5,15 @@
 		},
 		{
 			"path": "../rCM3-test-UM-fcst"
+		},
+		{
+			"path": "../../cylc-run/rCM3-test-UM-fcst"
+		},
+		{
+			"path": "../rCM3-test-UM-NUOPC"
+		},
+		{
+			"path": "../access-cm3-configs"
 		}
 	],
 	"settings": {}
