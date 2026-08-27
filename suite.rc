@@ -39,6 +39,8 @@
    recon jobs. Our EC data is stored in hourly files. We add '+1' so the jinja loop will run from 00 to 24 #}
 {% set n_lbcs = 24 + 1 %}
 
+{# Process Build Mode #}
+
 ###### Scheduling and dependencies ##################}
 
 [cylc]
@@ -63,6 +65,9 @@
             install_cold_hpc
             install_cold_hpc[^] => install_ec_startdata
             install_cold_hpc => nci_hres_eccb
+            {% if BUILD_MODE == "new" %}
+                fcm_make_um => Region_Resolution_Model_um_recon
+            {% endif %}
 
             ec_um_recon_000  =>  nci_hres_eccb => Region_Resolution_Model_um_recon => nci_hres_ic => Region_Resolution_Model_um_fcst_000
             ec_um_recon_000  =>  nci_hres_eccb => Region_Resolution_Model_um_createbc_000
@@ -133,6 +138,13 @@
         inherit = INSTALL_COLD, HOST_HPC
         [[[environment]]]
             ARCHIVE_SET_NAME = ${ROSE_SUITE_NAME}
+
+    {% if BUILD_MODE == "new" %}
+        [[fcm_make_um]]
+            inherit = UMBUILD_RESOURCE, UMBUILD
+            [[[environment]]]
+            STORAGE_PROJECT={{STORAGE_PROJECT}}
+    {% endif %}
 
     {# Driving model task family #}
     [[ec]]

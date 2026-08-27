@@ -36,7 +36,7 @@
     module list
 {% endmacro %}
 
-{% set UMVER = '13.5' %}
+{% set UMVER = '13.7' %}
 {% set PROJECT = PROJECT | default(environ['PROJECT']) %}
 {% set HPC_HOST = 'gadi.nci.org.au' %}
 {% set UM_ATM_MEM=4000 %}
@@ -73,7 +73,7 @@
             {% if BUILD_MODE == "spack" %}
             -l storage  = scratch/{{PROJECT}}+gdata/{{PROJECT}}+gdata/access+scratch/access+gdata/ki32+gdata/hr22+gdata/vk83{{ "+" ~ NCI_STORAGE if NCI_STORAGE != "" else ""}}
             {% else %} 
-            -l storage  = scratch/{{PROJECT}}+gdata/{{PROJECT}}+gdata/access+scratch/access+gdata/ki32+gdata/hr22{{ "+" ~ NCI_STORAGE if NCI_STORAGE != "" else ""}}
+            -l storage  = scratch/{{PROJECT}}+gdata/{{PROJECT}}+gdata/access+scratch/access+gdata/ki32+gdata/hr22+scratch/{{STORAGE_PROJECT}}{{ "+" ~ NCI_STORAGE if NCI_STORAGE != "" else ""}}
             {% endif %} 
             -W umask    = 0022
         [[[ environment ]]]
@@ -87,7 +87,9 @@
             umask 0077
             """
         [[[ environment ]]]
-            PLATFORM_CONFIG = nci-x86-ifort
+            CONFIG = nci-x86-ifort
+            OPTIM = safe
+            OPENMP= true
             PREBUILD =
             #MIRROR_TARGET = {{HPC_HOST}}:cylc-run/$ROSE_SUITE_NAME/share/$ROSE_TASK_NAME
             #ROSE_TASK_MIRROR_TARGET = {{HPC_HOST}}:cylc-run/$ROSE_SUITE_NAME/share/$ROSE_TASK_NAME
@@ -111,6 +113,68 @@
         [[[job]]]
             execution time limit = PT1H
        
+ #Build tasks from AM3    
+ {% set OPENMPI_VERSION = '4.1.7' %}
+ 
+    [[HPC]]
+        pre-script = """
+            module purge
+            module use ~access/modules
+            module load fcm
+            module load linaro-forge
+            module list -l
+            ulimit -s unlimited
+            ulimit -a
+        """
+
+        [[[ job ]]]
+            batch system = pbs
+            execution time limit = PT1H
+            submission retry delays = PT1M, PT5M, 3*PT15M
+        [[[ directives ]]]
+            -q          = normal
+            -P          = {{PROJECT}}
+            -l ncpus    = 1
+            -l mem      = 4gb
+            -l jobfs    = 4gb
+            -W umask    = 0022
+            -l storage  = gdata/access+gdata/xp65+gdata/ki32+gdata/hr22+gdata/vk83+scratch/{{STORAGE_PROJECT}}
+        [[[ remote ]]]
+            host = localhost
+        [[[ environment ]]]
+            CMIP6_ANCILS = 
+            UMDIR = ~access/umdir
+            PLATFORM = linux
+            ROSE_TASK_N_JOBS = ${PBS_NCPUS:-1}
+
+    [[UMBUILD]]
+        [[[environment]]]
+            CONFIG = nci-x86-ifort
+            OPENMP= true
+            OPTIM = safe 
+            PREBUILD = 
+
+    [[UMBUILD_RESOURCE]]
+        inherit = HPC
+        pre-script = """
+            module use /projects/access/modules
+            module load intel-compiler/2021.10.0
+            module load fcm
+            module load netcdf/4.7.1
+            module load openmpi/{{OPENMPI_VERSION}}
+            module load gcom/7.9_ompi.{{OPENMPI_VERSION}}
+        """
+
+        [[[ directives ]]]
+            -l ncpus    = 6
+            -l mem      = 24gb
+            -l jobfs    = 12gb
+            -l software = intel-compiler
+        [[[ environment ]]]
+            ROSE_TASK_OPTIONS = --archive
+
+# End AM3 build tasks
+
     [[CREATEBC]]
         [[[ environment ]]]
             PATH = $ROSE_SUITE_DIR/share/fcm_make_um_utils:$PATH
